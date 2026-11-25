@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 环境变量与密钥
+.env
+*.pem
+*.key
+
+# 运行产物
+runs/
+outputs/
+*.jsonl
+*.log
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jpg
+*.png
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store

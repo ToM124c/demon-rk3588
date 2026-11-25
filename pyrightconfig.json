@@ -1,0 +1,4 @@
+{
+  "include": ["phone_call_rknn", "rknn_multi_threaded"],
+  "extraPaths": ["."]
+}
