@@ -1,4 +1,4 @@
-from .config import IMAGE_EXTS, VIDEO_EXTS
+from ..config import IMAGE_EXTS, VIDEO_EXTS
 
 
 def is_video(path):

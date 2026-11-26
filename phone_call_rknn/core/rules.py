@@ -1,6 +1,6 @@
 import numpy as np
 
-from .config import (
+from ..config import (
     DEFAULT_PERSON_SCALE,
     LEFT_SHOULDER_IDX,
     LEFT_WRIST_IDX,

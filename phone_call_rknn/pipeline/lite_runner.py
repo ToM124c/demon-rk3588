@@ -2,8 +2,8 @@ import time
 
 from rknnlite.api import RKNNLite
 
-from .config import resolve_rknn_path
-from .preprocess import preprocess
+from ..config import resolve_rknn_path
+from ..core.preprocess import preprocess
 
 
 class RKNNRunner:

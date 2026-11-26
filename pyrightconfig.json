@@ -1,4 +1,16 @@
 {
-  "include": ["phone_call_rknn", "rknn_multi_threaded"],
-  "extraPaths": ["."]
+  "include": [
+    "phone_call_rknn",
+    "tests",
+    "legacy/engine_accel_old.py"
+  ],
+  "pythonVersion": "3.10",
+  "venvPath": "/home/firefly/anaconda3/envs",
+  "venv": "jl-rk3588",
+  "extraPaths": [
+    ".",
+    "/home/firefly/anaconda3/envs/jl-rk3588/lib/python3.10/site-packages"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "warning"
 }

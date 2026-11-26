@@ -1,0 +1,15 @@
+# 运行时依赖（板端 conda 环境 jl-rk3588）
+numpy>=1.24
+opencv-python>=4.8
+
+# HTTP 服务
+fastapi>=0.100
+uvicorn>=0.23
+minio>=7.2
+
+# 说明：
+# 1. 推理走 ctypes 直接加载系统 librknnrt.so，不需要 pip 装 rknn 包。
+# 2. 仅当运行参考链路（python -m phone_call_rknn.main，RKNNLite 单线程）时，
+#    才需要安装 rknn-toolkit-lite2（与板端 librknnrt 版本对齐，本机 2.3.2）。
+# 3. GStreamer/PyGObject 用系统包：apt install python3-gi gir1.2-gstreamer-1.0
+#    gir1.2-gst-plugins-base-1.0 gstreamer1.0-rockchip

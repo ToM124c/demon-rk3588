@@ -2,13 +2,13 @@ import time
 
 import cv2
 
-from .media import image_files
-from .postprocess import decode_detect_outputs, decode_pose_outputs
-from .preprocess import preprocess
-from .records import make_frame_record, write_record
-from .rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
-from .timing import add_timing_sums, new_timing_sums, print_overall_speed, round_timing, zero_runner_timing
-from .visualization import draw_annotations
+from ..core.media import image_files
+from ..core.postprocess import decode_detect_outputs, decode_pose_outputs
+from ..core.preprocess import preprocess
+from ..core.records import make_frame_record, write_record
+from ..core.rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
+from ..core.timing import add_timing_sums, new_timing_sums, print_overall_speed, round_timing, zero_runner_timing
+from ..core.visualize import draw_annotations
 
 
 def run_one_frame(frame, frame_idx, source_name, pose_runner, detect_runner, args):

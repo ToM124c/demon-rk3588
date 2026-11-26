@@ -1,13 +1,20 @@
+"""参考链路命令行入口（RKNNLite 单线程 + numpy，用于对照/小图集）。"""
+
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from phone_call_rknn.cli import parse_args
+from phone_call_rknn.app.cli import parse_args
+from phone_call_rknn.core.media import is_video
+from phone_call_rknn.pipeline.lite_runner import RKNNRunner
+from phone_call_rknn.pipeline.simple import process_images, process_video
 
 
-def main():
+def main() -> int:
     args = parse_args()
     source_path = Path(args.source)
     output_dir = Path(args.output_dir)
@@ -15,10 +22,6 @@ def main():
         raise FileNotFoundError(f"Source path not found: {source_path}")
     output_dir.mkdir(parents=True, exist_ok=True)
     result_path = output_dir / "frame_results.jsonl"
-
-    from phone_call_rknn.media import is_video
-    from phone_call_rknn.pipeline import process_images, process_video
-    from phone_call_rknn.rknn_runner import RKNNRunner
 
     pose_runner = RKNNRunner(args.pose_model, args.imgsz, args.pose_input_layout)
     detect_runner = RKNNRunner(args.detect_model, args.imgsz, args.detect_input_layout)
@@ -32,7 +35,8 @@ def main():
     finally:
         pose_runner.release()
         detect_runner.release()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

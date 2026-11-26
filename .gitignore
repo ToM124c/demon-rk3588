@@ -1,3 +1,8 @@
+# 本地草稿 / 临时产物
+.dev/
+.pytest_cache/
+.tests_tmp/
+
 # Python
 __pycache__/
 *.py[cod]
