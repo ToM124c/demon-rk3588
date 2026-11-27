@@ -55,9 +55,16 @@ NPU: rknn_run(input dma-buf) ──► int8 / fp16 原始输出
 vision.postprocess（量化域筛选 + 只反量化候选行）──► 判定 ──► 事件/可视化
 ```
 
-**非零拷贝路径**（`ZERO_COPY=0` 或摄像头）：OpenCV `CAP_GSTREAMER` 的 appsink
-返回 numpy NV12/BGR，`Frame.va` 有值，RGA 走 `importbuffer_virtualaddr`
+**软件解码路径**（`DECODE=cpu`，或硬件模式初始化失败且允许回退）：OpenCV/FFmpeg
+软解成 numpy BGR，`Frame.va` 有值、`Frame.fd` 为空，RGA 走 `importbuffer_virtualaddr`
 （两侧都是 handle）。两条路径共用同一套 `Frame` 与 worker 代码。
+
+解码只有两种模式，不存在“硬解 + CPU 拷贝”的中间态：
+
+| 模式 | 解码器 | 帧交付 |
+|---|---|---|
+| `DECODE=vpu` | `mppvideodec`（VPU） | dma-buf fd，零拷贝 |
+| `DECODE=cpu` | OpenCV/FFmpeg（CPU） | numpy BGR |
 
 ## 线程模型
 

@@ -9,6 +9,7 @@ export TEST_VIDEO=/mnt/jl/yolov26-rk3588/video/VID_20260603_102426_720p_h264.mp4
 
 python tests/test_rga_single_pass.py     # RGA 单次 CSC 正确性 + 耗时
 python tests/test_rknn_quantized.py      # want_float=0 与 RKNNLite 逐元素对齐
+python tests/test_capture_backends.py    # 解码后端：纯硬件 / 纯软件 / 失败回退
 python tests/test_engine_pipeline.py     # 零拷贝引擎端到端 + 吞吐
 python tests/test_service_events.py      # 事件流结构（假 MinIO，无需联网）
 python tests/bench_compare.py            # 新旧管线吞吐对比
@@ -25,6 +26,7 @@ python tests/test_escort_service.py      # 护送事件流（假 MinIO）
 | `test_rga_single_pass.py` | 一步 letterbox vs 旧三步实现 | 平均像素差 < 1（实测 ≈0.19），且更快 |
 | `test_rknn_quantized.py` | int8/fp16 输出 + 自反量化 vs RKNNLite | detect max diff < 1e-4（实测 0），pose < 1e-2 |
 | `test_engine_pipeline.py` | dma-buf 解码 → RGA → NPU 全链路 | 吞吐 ≥ 8 FPS（stride=15），预处理 < 6ms |
+| `test_capture_backends.py` | 两种解码模式与回退策略 | 硬解带 fd/NV12、软解无 fd/BGR；`fallback=False` 时抛错 |
 | `test_service_events.py` | NDJSON 事件结构 | stage_start 为首事件，字段完整，截图上传 |
 | `bench_compare.py` | 新旧管线同视频对比 | 打印吞吐与各阶段耗时 |
 | `test_escort_rules.py` | 角色/手部/合规判定 | 全部断言通过（不加载模型） |

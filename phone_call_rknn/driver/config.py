@@ -64,11 +64,11 @@ class EngineConfig:
     # 推理后端
     detect_cores: str = env_str("DETECT_CORES", "0,1")
     pose_cores: str = env_str("POSE_CORES", "2")
-    zero_copy: bool = env_bool("ZERO_COPY", True)
     npu_warmup: int = env_int("NPU_WARMUP", 5)
 
     # 解码 / 编码
-    decode: str = env_str("DECODE", "vpu")            # vpu（GStreamer 硬解）| cpu（OpenCV）
+    decode: str = env_str("DECODE", "vpu")            # vpu（硬解+dma-buf）| cpu（纯软解）
+    decode_fallback: bool = env_bool("DECODE_FALLBACK", True)
     codec: str = env_str("CODEC", "h264")
     encoder: str = env_str("ENCODER", "vpu")          # vpu | mp4v
     bitrate: Optional[int] = env_int("BITRATE", 0) or None

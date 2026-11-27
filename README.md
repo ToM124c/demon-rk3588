@@ -171,9 +171,10 @@ IDE 侧要点：
 |---|---|---|
 | `DETECT_MODEL` / `POSE_MODEL` | `/mnt/jl/yolov26-rk3588/model/...` | RKNN 模型路径（或目录，自动找第一个 `.rknn`） |
 | `DETECT_CORES` / `POSE_CORES` | `0,1` / `2` | NPU 绑核；`all` 表示三核合一 |
-| `ZERO_COPY` | `1` | 关闭后走 OpenCV appsink + numpy 兜底 |
+| `DECODE` | `vpu` | 解码模式：`vpu`（纯硬件，mppvideodec + dma-buf）/ `cpu`（纯软件，OpenCV） |
+| `DECODE_FALLBACK` | `1` | 硬件解码失败时是否回退软件解码（CLI 对应 `--strict-decode` 关闭） |
 | `DECODE` | `vpu` | `vpu`（GStreamer 硬解）或 `cpu`（OpenCV 软解） |
-| `CODEC` | `h264` | `h264` / `h265`；HEVC 走 10bit 时自动回退 CPU CSC |
+| `CODEC` | `h264` | `h264` / `h265`；HEVC 10bit 协商不出 NV12 时会回退软件解码 |
 | `FRAME_STRIDE` | `1` | 每 N 帧推理一帧（API 默认 15，见 `DRIVER_FRAME_STRIDE`） |
 | `FRAME_BUDGET` | `6` | 整条流水线同时持有的帧数（同时限制解码 dma-buf 数量） |
 | `DECODE_QUEUE` / `ENCODE_QUEUE` | `4` / `2` | 解码/编码队列深度（背压） |
@@ -185,9 +186,10 @@ IDE 侧要点：
 
 ## 已知限制
 
-- **零拷贝依赖 `memory:DMABuf`**：`v4l2src` 摄像头通常拿不到 dma-buf，会自动回退
-  OpenCV 路径（有一次 CPU 拷贝）；`vpu + h265` 若输出 10bit NV12，RGA 2.1 不支持
-  10bit CSC，会回退到 CPU 转换（慢但正确）。
+- **只有两种解码模式**：`DECODE=vpu` 是纯硬件（`mppvideodec` + `memory:DMABuf` 零拷贝），
+  `DECODE=cpu` 是纯软件（OpenCV/FFmpeg）。`v4l2src` 摄像头拿不到 dma-buf、
+  或 HEVC 10bit 协商不出 NV12 时，硬件模式初始化失败会**回退到软件解码**
+  （`--strict-decode` 可关掉回退直接报错）。
 - **可视化/取证会走 CPU**：只有需要 BGR 时才做 `NV12→BGR`（~2.7 ms/帧），
   API 模式下仅违规截图时才触发。
 - **抽帧不省解码**：`frame_stride>1` 仍要解码每一帧（文件/RTSP 无法按帧 seek），

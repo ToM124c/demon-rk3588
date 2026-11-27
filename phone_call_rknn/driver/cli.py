@@ -58,7 +58,9 @@ def parse_engine_args(argv=None):
     p.add_argument("--wrist-phone-pixel-thres", type=float, default=WRIST_PHONE_PIXEL_THRES)
     p.add_argument("--detect-cores", default=base.detect_cores, help="detect 使用的 NPU core，如 0,1")
     p.add_argument("--pose-cores", default=base.pose_cores, help="pose 使用的 NPU core，如 2")
-    p.add_argument("--decode", choices=("vpu", "cpu"), default=base.decode, help="vpu 硬解(dma-buf) / cpu 软解")
+    p.add_argument("--decode", choices=("vpu", "cpu"), default=base.decode,
+                   help="vpu 纯硬件解码(dma-buf) / cpu 纯软件解码(OpenCV)")
+    p.add_argument("--strict-decode", action="store_true", help="硬件解码失败时不回退软解，直接报错")
     p.add_argument("--codec", choices=("h264", "h265", "hevc"), default=base.codec)
     p.add_argument("--encoder", choices=("vpu", "mp4v"), default=base.encoder, help="输出编码")
     p.add_argument("--bitrate", type=int, default=None, help="硬编码码率 bps")
@@ -66,7 +68,6 @@ def parse_engine_args(argv=None):
     p.add_argument("--encode-queue", type=int, default=base.encode_queue)
     p.add_argument("--frame-budget", type=int, default=base.frame_budget, help="整条流水线同时持有的帧数")
     p.add_argument("--frame-stride", type=int, default=base.frame_stride, help="每 N 帧推理一帧")
-    p.add_argument("--no-zero-copy", action="store_true", help="关闭 dma-buf 零拷贝（回退 numpy 路径）")
     p.add_argument("--save-vis", action="store_true", help="保存可视化视频（默认不保存）")
     p.add_argument("--display", action="store_true", help="实时显示（需要 GUI）")
     p.add_argument("--quiet", action="store_true", help="不逐帧打印 JSON")
@@ -86,8 +87,8 @@ def parse_engine_args(argv=None):
         wrist_phone_pixel_thres=args.wrist_phone_pixel_thres,
         detect_cores=args.detect_cores,
         pose_cores=args.pose_cores,
-        zero_copy=not args.no_zero_copy,
         decode=args.decode,
+        decode_fallback=not args.strict_decode,
         codec=args.codec,
         encoder=args.encoder,
         bitrate=args.bitrate,

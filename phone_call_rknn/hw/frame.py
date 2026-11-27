@@ -72,11 +72,19 @@ def frame_from_sample(sample, width: int, height: int, pixel_format: str = "nv12
     size = mem.get_sizes()[0]
     wstride, hstride = width, height
     if size != width * height * 3 // 2:
+        # 优先用 GstVideoMeta；没有时按 buffer 大小反推行 stride（宽高非 16 对齐常见）
         meta = buf.get_meta(GstVideo.VideoMeta.get_info())
-        if meta is None:
-            raise UnsupportedSample(f"padded dma-buf {size}B without GstVideoMeta")
-        wstride = int(meta.stride[0])
-        hstride = hstride if wstride == width else (size * 2 // 3) // wstride
+        if meta is not None:
+            wstride = int(meta.stride[0])
+            hstride = hstride if wstride == width else (size * 2 // 3) // wstride
+        else:
+            per_row = size * 2 // (3 * height)
+            if per_row >= width and per_row * height * 3 // 2 == size:
+                wstride = per_row
+            else:
+                raise UnsupportedSample(
+                    f"cannot derive stride from dma-buf size {size}B for {width}x{height} NV12"
+                )
 
     fd = GstAllocators.dmabuf_memory_get_fd(mem)
     if fd < 0:

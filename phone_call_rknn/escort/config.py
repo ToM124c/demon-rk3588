@@ -94,9 +94,9 @@ class EscortConfig:
 
     # 一个 worker 同时跑 hand + pose，绑在同一个 NPU 核上；多个核用逗号分隔
     cores: str = env_str("ESCORT_CORES", "2")
-    zero_copy: bool = env_bool("ZERO_COPY", True)
     decode: str = env_str("ESCORT_DECODE", "vpu")
     codec: str = env_str("ESCORT_CODEC", "h264")
+    decode_fallback: bool = env_bool("DECODE_FALLBACK", True)
     frame_stride: int = env_int("ESCORT_FRAME_STRIDE", 1)
     decode_queue: int = env_int("ESCORT_DECODE_QUEUE", 4)
     frame_budget: int = env_int("ESCORT_FRAME_BUDGET", 6)

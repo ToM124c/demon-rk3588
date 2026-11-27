@@ -354,8 +354,8 @@ class EscortPipeline:
                    frame_stride: Optional[int] = None) -> Iterator[EscortResult]:
         cfg = self.config
         stride = max(1, int(frame_stride or cfg.frame_stride))
-        cap = open_capture(source, codec=cfg.codec, zero_copy=cfg.zero_copy,
-                           fallback=True, cpu=(cfg.decode == "cpu"))
+        cap = open_capture(source, codec=cfg.codec, fallback=cfg.decode_fallback,
+                           cpu=(cfg.decode == "cpu"))
         name = source_name or str(source)
         budget = FrameBudget(cfg.frame_budget)
         raw = BoundedQueue(cfg.decode_queue)

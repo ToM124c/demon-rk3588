@@ -50,10 +50,11 @@ def parse_args(argv=None):
     parser.add_argument("--contact-pixel-thres", type=float, default=base.contact_pixel_thres,
                         help="警察手到嫌疑人肘部的最大像素距离")
     parser.add_argument("--cores", default=base.cores, help="worker 绑定的 NPU 核，如 2 或 0,1")
-    parser.add_argument("--decode", choices=("vpu", "cpu"), default=base.decode)
+    parser.add_argument("--decode", choices=("vpu", "cpu"), default=base.decode,
+                        help="vpu 纯硬件解码(dma-buf) / cpu 纯软件解码(OpenCV)")
+    parser.add_argument("--strict-decode", action="store_true", help="硬件解码失败时不回退软解，直接报错")
     parser.add_argument("--codec", choices=("h264", "h265", "hevc"), default=base.codec)
     parser.add_argument("--frame-stride", type=int, default=base.frame_stride, help="每 N 帧推理一帧")
-    parser.add_argument("--no-zero-copy", action="store_true", help="关闭 dma-buf 零拷贝")
     parser.add_argument("--save-vis", action="store_true", help="保存可视化视频/图片")
     parser.add_argument("--quiet", action="store_true", help="不逐帧打印 JSON")
     parser.add_argument("--log-interval", type=int, default=30, help="视频进度打印间隔")
@@ -71,8 +72,8 @@ def parse_args(argv=None):
         hand_max_pixel_dist=args.hand_max_pixel_dist,
         contact_pixel_thres=args.contact_pixel_thres,
         cores=args.cores,
-        zero_copy=not args.no_zero_copy,
         decode=args.decode,
+        decode_fallback=not args.strict_decode,
         codec=args.codec,
         frame_stride=args.frame_stride,
         no_save_vis=not args.save_vis,

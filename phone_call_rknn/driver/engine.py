@@ -389,8 +389,8 @@ class AccelEngine:
         """逐帧产出 `FrameResult`；抽帧在**解码侧**完成，跳过的帧不建 Frame/不占预算。"""
         cfg = self.config
         stride = max(1, int(frame_stride or cfg.frame_stride))
-        cap = open_capture(source, codec=cfg.codec, zero_copy=cfg.zero_copy,
-                           fallback=True, cpu=(cfg.decode == "cpu"))
+        cap = open_capture(source, codec=cfg.codec, fallback=cfg.decode_fallback,
+                           cpu=(cfg.decode == "cpu"))
         name = source_name or str(source)
         budget = FrameBudget(cfg.frame_budget)
         raw = BoundedQueue(cfg.decode_queue)

@@ -1,9 +1,11 @@
 """GStreamer 层：硬解出 dma-buf、硬编 H.264。
 
-- `DmaBufCapture`：`mppvideodec` 输出 `video/x-raw(memory:DMABuf)`，
+- `DmaBufCapture`：**纯硬件解码**。`mppvideodec` 输出 `video/x-raw(memory:DMABuf)`，
   通过 appsink 拿到 **dma-buf fd**，全程不进 CPU 内存（零拷贝起点）。
-- `OpenCVNv12Capture`：没装 PyGObject 时的兜底（appsink 取 NV12 到 numpy）。
+- `CvCapture`：**纯软件解码**。OpenCV 默认后端（FFmpeg）软解到 numpy BGR。
 - `VpuWriter`：`appsrc -> videoconvert -> mpph264enc -> mp4mux` 硬编。
+
+只有这两种解码模式；硬件解码初始化失败时按 `fallback` 决定是回退软件解码还是直接报错。
 
 依赖：系统 `python3-gi`（Debian/Ubuntu 自带）。conda 环境里通过把
 `/usr/lib/python3/dist-packages` 加入 sys.path 复用系统 gi。
@@ -11,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
@@ -23,6 +26,12 @@ import numpy as np
 from .frame import Frame, UnsupportedSample, frame_from_sample
 
 _SYSTEM_GI_PATH = "/usr/lib/python3/dist-packages"
+
+# 硬件解码器协商出来的像素格式 -> 项目内部的 format 名称
+_PIXEL_FORMATS = {
+    "NV12": "nv12",
+    "NV12_10LE40": "nv12_10le40",
+}
 
 Gst: Any = None
 GstApp: Any = None
@@ -71,6 +80,7 @@ def gst_available() -> bool:
 
 
 _SINK_PROPS = "appsink drop=false sync=false max-buffers=4"
+log = logging.getLogger(__name__)
 
 
 class DmaBufCapture:
@@ -92,6 +102,7 @@ class DmaBufCapture:
         self._pending = None
         self.pipeline.set_state(Gst.State.PLAYING)
         self.width, self.height = 0, 0
+        self.pixel_format = "nv12"
         self._probe_caps()
 
     # ---- 构图 -----------------------------------------------------
@@ -150,6 +161,14 @@ class DmaBufCapture:
         caps = sample.get_caps().get_structure(0)
         self.width = int(caps.get_value("width"))
         self.height = int(caps.get_value("height"))
+        # 像素格式以协商结果为准，不按 codec 猜（8bit/10bit HEVC 都可能出现）
+        fmt = str(caps.get_value("format"))
+        self.pixel_format = _PIXEL_FORMATS.get(fmt, "nv12")
+        if fmt not in _PIXEL_FORMATS:
+            raise RuntimeError(
+                f"unsupported hardware-decoded format: {fmt}; "
+                f"use DECODE=cpu (software decode) instead"
+            )
         self._pending = sample  # 第一帧留给第一次 read()
 
     # ---- 读取 -----------------------------------------------------
@@ -166,9 +185,12 @@ class DmaBufCapture:
                 self._eos = True
                 return None
             try:
-                return frame_from_sample(sample, self.width, self.height, self._pixel_format())
-            except UnsupportedSample:
-                return None
+                return frame_from_sample(sample, self.width, self.height, self.pixel_format)
+            except UnsupportedSample as exc:
+                raise RuntimeError(
+                    f"unsupported dma-buf frame layout ({exc}); "
+                    f"use DECODE=cpu (software decode) instead"
+                ) from exc
 
     def drop_one(self) -> bool:
         """丢弃一帧：不取 fd、不建 Frame（抽帧时用，最省 CPU）。"""
@@ -178,9 +200,6 @@ class DmaBufCapture:
                 return True
             return self.appsink.try_pull_sample(int(1e9)) is not None
 
-    def _pixel_format(self) -> str:
-        return "nv12_10le40" if self.codec in {"h265", "hevc"} else "nv12"
-
     def release(self) -> None:
         pipeline = self.pipeline
         try:
@@ -188,58 +207,6 @@ class DmaBufCapture:
                 pipeline.set_state(Gst.State.NULL)
         finally:
             self.pipeline = None
-
-
-class OpenCVNv12Capture:
-    """兜底：OpenCV + GStreamer appsink，NV12 进 numpy（有一次拷贝）。"""
-
-    def __init__(self, source, codec: str = "h264", fallback: bool = True):
-        self.source = str(source)
-        self.codec = codec.lower()
-        self.pipeline = self._build()
-        self.cap = cv2.VideoCapture(self.pipeline, cv2.CAP_GSTREAMER) if self.pipeline else None
-        if (self.cap is None or not self.cap.isOpened()) and fallback:
-            self.cap = cv2.VideoCapture(int(self.source) if self.source.isdigit() else self.source)
-            self.pipeline = None
-        if self.cap is None or not self.cap.isOpened():
-            raise RuntimeError(f"cannot open capture: {self.source}\n{self.pipeline}")
-        w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        if h > w and h > w * 0.75:      # OpenCV NV12 appsink 常报打包高度
-            h = h * 2 // 3
-        self.width, self.height = w, h
-
-    def _build(self):
-        if self.source.isdigit():
-            return None
-        sink = "video/x-raw,format=NV12 ! appsink drop=false sync=false max-buffers=4"
-        if self.source.startswith(("rtsp://", "rtmp://")):
-            depay = "rtph265depay" if self.codec in {"h265", "hevc"} else "rtph264depay"
-            return f'rtspsrc location="{self.source}" latency=100 ! {depay} ! {self._decoder()} ! {sink}'
-        path = Path(self.source)
-        return f'filesrc location="{path}" ! {DmaBufCapture._demux_for_suffix(path.suffix.lower())} ! {self._decoder()} ! {sink}'
-
-    def _decoder(self):
-        parser = "h265parse" if self.codec in {"h265", "hevc"} else "h264parse"
-        return f"{parser} ! mppvideodec"
-
-    def read(self):
-        if self.cap is None:
-            return None
-        ret, frame = self.cap.read()
-        if not ret or frame is None:
-            return None
-        if frame.ndim == 2:
-            return Frame(width=self.width, height=self.height, pixel_format="nv12", va=frame, _keepalive=frame)
-        return Frame(width=self.width, height=self.height, pixel_format="bgr", va=frame, _keepalive=frame)
-
-    def drop_one(self) -> bool:
-        return bool(self.cap is not None and self.cap.grab())
-
-    def release(self):
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
 
 
 class CvCapture:
@@ -271,18 +238,24 @@ class CvCapture:
             self.cap = None
 
 
-def open_capture(source, codec: str = "h264", zero_copy: bool = True, fallback: bool = True,
-                 cpu: bool = False):
-    """按优先级选择采集后端：CPU 软解 / dma-buf 零拷贝 / NV12 兜底。"""
+def open_capture(source, codec: str = "h264", fallback: bool = True, cpu: bool = False):
+    """两种解码模式：
+
+    - ``cpu=False``：纯硬件解码（mppvideodec + dma-buf 零拷贝）
+    - ``cpu=True``：纯软件解码（OpenCV/FFmpeg，CPU 上解，返回 BGR numpy）
+
+    ``fallback=True`` 时，硬件解码初始化失败会**回退到软件解码**（并打印告警）；
+    为 False 则直接抛错。
+    """
     if cpu:
         return CvCapture(source)
-    if zero_copy and _import_gst():
-        try:
-            return DmaBufCapture(source, codec=codec)
-        except Exception as exc:  # pragma: no cover - 板端差异
-            if not fallback:
-                raise RuntimeError(f"dma-buf capture failed: {exc}") from exc
-    return OpenCVNv12Capture(source, codec=codec, fallback=fallback)
+    try:
+        return DmaBufCapture(source, codec=codec)
+    except Exception as exc:
+        if not fallback:
+            raise RuntimeError(f"hardware decode failed: {exc}") from exc
+        log.warning("hardware decode unavailable (%s); falling back to software decode", exc)
+        return CvCapture(source)
 
 
 class VpuWriter:
