@@ -92,6 +92,24 @@ core.postprocess（量化域筛选 + 只反量化候选行）──► 判定 �
 声明成 `UINT8/NHWC`，由 runtime 做「uint8 → 模型输入」的转换——这与
 `rknn_inputs_set` 的语义一致，实验证明结果与 RKNNLite 逐元素相同。
 
+## 护送模式（escort）的差异
+
+`phone_call_rknn/escort/` 与司机模式共用 `hw/`（dma-buf、RGA、RKNN）与 `pipeline/queues.py`，
+但编排不同：每帧**同时**需要 hand 检测和 pose，所以一个 worker 内部顺序跑两个模型，
+并且**两个模型共享同一块输入 dma-buf**——一次 RGA 预处理同时喂两个模型：
+
+```
+dma-buf 帧 ──RGA improcess──► 输入 dma-buf（640x640 RGB, uint8）
+                                  ├─► hand ctx.rknn_run  (core 2)
+                                  └─► pose ctx.rknn_run  (core 2, 用 rknn_create_mem_from_fd 导入同一个 fd)
+```
+
+要点：`rknn_create_mem_from_fd` 必须传 `virt_addr`（传 NULL 会得到
+`RKNN_ERR_MALLOC_FAIL`），我们直接把 owner 张量的 `mem.virt_addr` 传进去。
+
+判定逻辑（角色分配、手部归属、合规规则）在 `escort/rules.py`，是不依赖硬件的纯函数，
+`tests/test_escort_rules.py` 用构造数据覆盖了「三人在场」「手在腕内」「双手控双肘」等场景。
+
 ## 事件层
 
 `app/service.py` 把 `FrameResult` 转成业务事件：

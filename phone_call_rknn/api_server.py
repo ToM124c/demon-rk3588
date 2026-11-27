@@ -16,7 +16,7 @@ if __package__ in (None, ""):
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
-from phone_call_rknn.app.escort import release_escort_runners
+from phone_call_rknn.app.escort import release_escort
 from phone_call_rknn.app.service import MODE_DRIVER, release_engine, stream_task
 
 app = FastAPI(title="Driver Behavior Detection API", version="2.0")
@@ -25,7 +25,7 @@ app = FastAPI(title="Driver Behavior Detection API", version="2.0")
 @app.on_event("shutdown")
 def _on_shutdown() -> None:
     release_engine()
-    release_escort_runners()
+    release_escort()
 
 
 @app.get("/health")

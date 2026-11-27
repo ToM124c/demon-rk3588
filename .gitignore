@@ -35,3 +35,6 @@ outputs/
 .idea/
 .vscode/
 .DS_Store
+
+# 模型二进制（体积大，按需 git add -f 或走 LFS）
+model/*.rknn

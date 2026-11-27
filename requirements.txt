@@ -1,6 +1,7 @@
 # 运行时依赖（板端 conda 环境 jl-rk3588）
 numpy>=1.24
 opencv-python>=4.8
+pillow>=9.0          # 中文状态面板绘制（core/visualize、escort/visualize）
 
 # HTTP 服务
 fastapi>=0.100

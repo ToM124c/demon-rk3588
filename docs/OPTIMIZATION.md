@@ -104,6 +104,23 @@ pose 同理：先在 fp16 的置信度列上筛选，再对候选行 `astype(flo
 - **绑定 npu 核**：detect 2 实例绑 core0/1、pose 1 实例绑 core2，各自线程内独占
   上下文，推理路径无锁。
 
+## 4.1 护送模式（escort）的收益
+
+同一套 `hw/` 层用在护送模式上（旧实现是仓库外的独立脚本，用 RKNNLite + CPU letterbox）：
+
+| 指标 | 旧脚本 | 新 escort 管线 |
+|---|---|---|
+| 预处理 | 10.3 ms（CPU letterbox） | **1.65 ms**（RGA 一次） |
+| hand 推理 | 30.8 ms | 31.6 ms |
+| pose 推理 | 116–133 ms | 119–133 ms（同量级，受温度/DVFS 影响） |
+| 单帧 total | ~170 ms | ~165 ms |
+
+判定一致性：60 帧 h264 片段上 **60/60 帧** 的 `label + reason` 完全相同，
+`hand_count`、`role_ok` 也无差异（`tests/test_escort_pipeline.py --parity` 可复跑）。
+
+护送模式额外做到：两个模型共享一块输入 dma-buf，只做一次 RGA（旧脚本的共享是
+在 CPU numpy 上共享，仍需一次 CPU letterbox）。
+
 ## 5. 最终对比
 
 `tests/bench_compare.py`（40 帧，stride=15，同一视频、同一模型）：

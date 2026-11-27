@@ -1,35 +1,28 @@
-"""「护送/交警手势」模式：复用外部脚本的推理实现（非零拷贝，历史路径）。
+"""护送 / 交警手势模式的服务层：MinIO 取流 → 推理 → NDJSON 事件。
 
-这部分逻辑依赖 `/mnt/jl/yolov26-rk3588/inference-police-escort-rknn-hand-assign.py`
-（不在本仓库内），因此单独隔离，默认不参与司机行为主链路。
+推理在 `phone_call_rknn.escort` 包里（仓库内，零拷贝），这里只负责
+「取流 → 抽帧 → 违规时段聚合 → 事件」。
 """
 
 from __future__ import annotations
 
-import importlib.util as importlib_util
-import os
-import sys
 import tempfile
 import threading
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
-import cv2
-
+from ..escort import EscortPipeline, default_escort_config
+from ..escort.visualize import annotate_frame
 from .service import (
     CODING_LEFT_POLICE_ACTION,
     CODING_RIGHT_POLICE_ACTION,
     CODING_SUSPECT_HAND,
     ESCORT_FRAME_STRIDE,
-    ESCORT_ROOT,
-    ESCORT_SCRIPT,
     MODE_ESCORT,
     VIDEO_BUCKET,
     ViolationPeriodTracker,
     base_event,
     completion_events,
-    ensure_bucket,
     escort_codings_from_record,
     make_minio_client,
     ndjson_event,
@@ -37,84 +30,44 @@ from .service import (
     violation_period_event,
 )
 
-_escort_lock = threading.Lock()
-_escort_module = None
-_escort_pose_runner = None
-_escort_detect_runner = None
+_pipeline_lock = threading.Lock()
+_pipeline: Optional[EscortPipeline] = None
 
 
-@dataclass
-class EscortArgs:
-    pose_model: str
-    detect_model: str
-    imgsz: int = 640
-    det_conf: float = 0.3
-    person_conf: float = 0.25
-    kpt_conf: float = 0.30
-    iou: float = 0.45
-    hand_max_pixel_dist: float = 180.0
-    suspect_wrist_pixel_thres: float = 120.0
-    contact_pixel_thres: float = 95.0
-    pose_input_layout: str = "nhwc"
-    detect_input_layout: str = "nhwc"
-    no_save_vis: bool = True
-    quiet: bool = True
-    log_interval: int = 30
+def get_escort_pipeline() -> EscortPipeline:
+    """模型只加载一次（进程内单例）。"""
+    global _pipeline
+    if _pipeline is None:
+        cfg = default_escort_config(
+            frame_stride=ESCORT_FRAME_STRIDE,
+            no_save_vis=True,
+            quiet=True,
+        )
+        _pipeline = EscortPipeline(cfg).start()
+    return _pipeline
 
 
-def load_escort_module():
-    global _escort_module
-    if _escort_module is not None:
-        return _escort_module
-    if not Path(ESCORT_SCRIPT).is_file():
-        raise FileNotFoundError(f"Escort script not found: {ESCORT_SCRIPT}")
-    sys.path.insert(0, str(ESCORT_ROOT))
-    spec = importlib_util.spec_from_file_location("police_escort_inference", str(ESCORT_SCRIPT))
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load escort script: {ESCORT_SCRIPT}")
-    module = importlib_util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    _escort_module = module
-    return _escort_module
+def release_escort() -> None:
+    global _pipeline
+    if _pipeline is not None:
+        _pipeline.release()
+        _pipeline = None
 
 
-def build_escort_args(module) -> EscortArgs:
-    return EscortArgs(
-        pose_model=os.getenv("ESCORT_POSE_MODEL", module.POSE_MODEL),
-        detect_model=os.getenv("ESCORT_DETECT_MODEL", module.DETECT_MODEL),
-        imgsz=int(os.getenv("ESCORT_IMGSZ", "640")),
-        det_conf=float(os.getenv("ESCORT_DET_CONF", "0.3")),
-        person_conf=float(os.getenv("ESCORT_PERSON_CONF", "0.25")),
-        kpt_conf=float(os.getenv("ESCORT_KPT_CONF", "0.30")),
-        iou=float(os.getenv("ESCORT_IOU", "0.45")),
-        hand_max_pixel_dist=float(os.getenv("ESCORT_HAND_MAX_PIXEL_DIST", "180.0")),
-        suspect_wrist_pixel_thres=float(os.getenv("ESCORT_SUSPECT_WRIST_PIXEL_THRES", "120.0")),
-        contact_pixel_thres=float(os.getenv("ESCORT_CONTACT_PIXEL_THRES", "95.0")),
-        pose_input_layout=os.getenv("ESCORT_POSE_INPUT_LAYOUT", "nhwc"),
-        detect_input_layout=os.getenv("ESCORT_DETECT_INPUT_LAYOUT", "nhwc"),
-        no_save_vis=True,
-        quiet=True,
+# 兼容旧名字（api_server 曾用 release_escort_runners）
+release_escort_runners = release_escort
+
+
+def _visualize_on(frame, result):
+    """在给定 BGR 帧上按该帧的判定结果重绘（供违规截图使用）。"""
+    return annotate_frame(
+        frame,
+        result.analysis["roles"],
+        result.analysis["pose_people"],
+        result.analysis["hand_dets"],
+        result.frame_result,
+        show_action_details=False,
     )
-
-
-def get_escort_runners():
-    global _escort_pose_runner, _escort_detect_runner
-    module = load_escort_module()
-    args = build_escort_args(module)
-    if _escort_pose_runner is None:
-        _escort_pose_runner = module.util.RKNNRunner(args.pose_model, args.imgsz, args.pose_input_layout)
-    if _escort_detect_runner is None:
-        _escort_detect_runner = module.util.RKNNRunner(args.detect_model, args.imgsz, args.detect_input_layout)
-    return module, _escort_pose_runner, _escort_detect_runner, args
-
-
-def release_escort_runners() -> None:
-    global _escort_pose_runner, _escort_detect_runner
-    for runner in (_escort_pose_runner, _escort_detect_runner):
-        if runner is not None:
-            runner.release()
-    _escort_pose_runner = None
-    _escort_detect_runner = None
 
 
 def run_escort_analysis(task_id: str) -> Iterator[str]:
@@ -126,46 +79,26 @@ def run_escort_analysis(task_id: str) -> Iterator[str]:
 
         yield ndjson_event(base_event("stage_start", task_id, MODE_ESCORT))
         fps = probe_video_fps(local_video)
-        cap = cv2.VideoCapture(str(local_video))
-        if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video: {local_video}")
-
         completion_seconds = 0.0
-        candidate_codings = (CODING_SUSPECT_HAND, CODING_LEFT_POLICE_ACTION, CODING_RIGHT_POLICE_ACTION)
-        tracker = ViolationPeriodTracker(candidate_codings, client, task_id, work_dir)
-        frame_idx = 0
-        try:
-            with _escort_lock:
-                module, pose_runner, detect_runner, args = get_escort_runners()
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    frame_idx += 1
-                    video_seconds = (frame_idx - 1) / fps
-                    completion_seconds = video_seconds
-                    if (frame_idx - 1) % ESCORT_FRAME_STRIDE != 0:
-                        continue
-                    record, visualization_data, _ = module.run_one_frame(
-                        frame, frame_idx, task_id, pose_runner, detect_runner, args, defer_visualization=True
-                    )
-                    for period in tracker.update(
-                        escort_codings_from_record(record),
-                        video_seconds,
-                        frame_idx,
-                        frame,
-                        visualize_frame=lambda f, data=visualization_data: module.annotate_frame(
-                            f,
-                            data["roles"],
-                            data["pose_people"],
-                            data["hand_dets"],
-                            data["frame_result"],
-                            show_action_details=False,
-                        ),
-                    ):
-                        yield violation_period_event(task_id, MODE_ESCORT, period)
-        finally:
-            cap.release()
+        tracker = ViolationPeriodTracker(
+            (CODING_SUSPECT_HAND, CODING_LEFT_POLICE_ACTION, CODING_RIGHT_POLICE_ACTION),
+            client, task_id, work_dir,
+        )
+
+        with _pipeline_lock:
+            pipeline = get_escort_pipeline()
+            for result in pipeline.iter_video(local_video, source_name=task_id,
+                                              frame_stride=ESCORT_FRAME_STRIDE):
+                video_seconds = (result.frame_idx - 1) / fps
+                completion_seconds = video_seconds
+                for period in tracker.update(
+                    escort_codings_from_record(result.record),
+                    video_seconds,
+                    result.frame_idx,
+                    result.bgr(),
+                    visualize_frame=lambda frame, res=result: _visualize_on(frame, res),
+                ):
+                    yield violation_period_event(task_id, MODE_ESCORT, period)
 
         for period in tracker.finish():
             yield violation_period_event(task_id, MODE_ESCORT, period)

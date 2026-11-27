@@ -12,6 +12,12 @@ python tests/test_rknn_quantized.py      # want_float=0 与 RKNNLite 逐元素�
 python tests/test_engine_pipeline.py     # 零拷贝引擎端到端 + 吞吐
 python tests/test_service_events.py      # 事件流结构（假 MinIO，无需联网）
 python tests/bench_compare.py            # 新旧管线吞吐对比
+
+# 护送模式（无需外部脚本）
+export TEST_ESCORT_VIDEO=/mnt/jl/yolov26-rk3588/video/test-2/test-escort-3.mp4
+python tests/test_escort_rules.py        # 角色/手分配/合规判定（纯逻辑）
+python tests/test_escort_pipeline.py     # 零拷贝管线端到端
+python tests/test_escort_service.py      # 护送事件流（假 MinIO）
 ```
 
 | 脚本 | 验证内容 | 判定标准 |
@@ -21,6 +27,9 @@ python tests/bench_compare.py            # 新旧管线吞吐对比
 | `test_engine_pipeline.py` | dma-buf 解码 → RGA → NPU 全链路 | 吞吐 ≥ 8 FPS（stride=15），预处理 < 6ms |
 | `test_service_events.py` | NDJSON 事件结构 | stage_start 为首事件，字段完整，截图上传 |
 | `bench_compare.py` | 新旧管线同视频对比 | 打印吞吐与各阶段耗时 |
+| `test_escort_rules.py` | 角色/手部/合规判定 | 全部断言通过（不加载模型） |
+| `test_escort_pipeline.py` | hand+pose 共享输入的零拷贝管线 | 产出帧、预处理 < 6ms、记录含 roles/hands |
+| `test_escort_service.py` | 护送 NDJSON 事件 + 截图 | stage_start 首事件、coding ∈ {3,4,5} |
 
 实测参考（ROC-RK3588S-PC，720p H.264 24fps，stride=15，40 帧）：
 

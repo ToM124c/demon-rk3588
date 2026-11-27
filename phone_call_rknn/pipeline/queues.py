@@ -9,63 +9,62 @@ from typing import Callable, Optional
 
 
 class BoundedQueue:
-    """可关闭的有界队列（线程安全的阻塞背压）。"""
+    """可关闭的有界队列（线程安全的阻塞背压）。
 
-    _STOP = object()
+    关闭后：
+    - `put()` 立即返回 False（调用方负责释放资源）；
+    - `get()` 在排空后立即返回 None，**不依赖哨兵元素**，避免队列满时哨兵丢失
+      导致消费者永久阻塞。
+    """
 
     def __init__(self, maxsize: int = 4):
         if maxsize < 1:
             raise ValueError("maxsize must be >= 1")
         self._q: queue.Queue = queue.Queue(maxsize=maxsize)
-        self._closed = False
+        self._closed = threading.Event()
 
-    def put(self, item) -> bool:
-        """阻塞放入；队列已关闭时丢弃并返回 False。"""
-        while True:
-            if self._closed:
-                return False
+    def put(self, item, timeout: Optional[float] = None) -> bool:
+        """阻塞放入；队列已关闭时返回 False。timeout 为 None 表示一直等到能放入。"""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not self._closed.is_set():
             try:
-                self._q.put(item, timeout=0.1)
+                self._q.put(item, timeout=0.05)
                 return True
             except queue.Full:
-                continue
+                if deadline is not None and time.monotonic() >= deadline:
+                    return False
+        return False
 
     def get(self, timeout: Optional[float] = None):
         """取出元素；关闭且排空后返回 None。"""
-        if timeout is None:
-            item = self._q.get()
-        else:
-            try:
-                item = self._q.get(timeout=timeout)
-            except queue.Empty:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if self._closed.is_set() and self._q.empty():
                 return None
-        if item is self._STOP:
-            self._q.put(self._STOP)   # 让其他消费者也能退出
-            return None
-        return item
+            if deadline is None:
+                wait = 0.05
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                wait = min(0.05, remaining)
+            try:
+                return self._q.get(timeout=wait)
+            except queue.Empty:
+                continue
 
     def get_nowait(self):
         try:
-            item = self._q.get_nowait()
+            return self._q.get_nowait()
         except queue.Empty:
             return None
-        if item is self._STOP:
-            self._q.put(self._STOP)
-            return None
-        return item
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self._q.put_nowait(self._STOP)
-        except queue.Full:
-            pass
+        self._closed.set()
 
     @property
     def closed(self) -> bool:
-        return self._closed
+        return self._closed.is_set()
 
     def qsize(self) -> int:
         return self._q.qsize()

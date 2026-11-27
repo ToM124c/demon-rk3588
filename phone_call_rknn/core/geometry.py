@@ -93,3 +93,32 @@ def box_pair_iou(box_a, box_b):
 def is_finite_array(values):
     return bool(np.all(np.isfinite(np.asarray(values, dtype=np.float32))))
 
+
+
+def box_area(box):
+    """xyxy 框面积。"""
+    box = np.asarray(box, dtype=np.float32)
+    return max(float(box[2] - box[0]), 0.0) * max(float(box[3] - box[1]), 0.0)
+
+
+def intersection_area(box_a, box_b):
+    """两个 xyxy 框的交集面积。"""
+    a = np.asarray(box_a, dtype=np.float32)
+    b = np.asarray(box_b, dtype=np.float32)
+    x1 = max(float(a[0]), float(b[0]))
+    y1 = max(float(a[1]), float(b[1]))
+    x2 = min(float(a[2]), float(b[2]))
+    y2 = min(float(a[3]), float(b[3]))
+    return max(x2 - x1, 0.0) * max(y2 - y1, 0.0)
+
+
+def point_in_box(point, box, margin=0.0):
+    """点是否落在 xyxy 框内（可外扩 margin 像素）。"""
+    if point is None:
+        return False
+    x, y = float(point[0]), float(point[1])
+    box = np.asarray(box, dtype=np.float32)
+    return (
+        float(box[0]) - margin <= x <= float(box[2]) + margin
+        and float(box[1]) - margin <= y <= float(box[3]) + margin
+    )

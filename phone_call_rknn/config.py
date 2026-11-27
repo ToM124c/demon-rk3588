@@ -34,11 +34,28 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOCAL_MODEL_DIR = PROJECT_ROOT / "model"
+
+
+def model_path(env_name: str, filename: str, fallback: str) -> Path:
+    """模型路径解析：环境变量 > 仓库内 model/ > 外部默认路径。"""
+    explicit = os.environ.get(env_name)
+    if explicit:
+        return Path(explicit)
+    local = LOCAL_MODEL_DIR / filename
+    if local.is_file():
+        return local
+    return Path(fallback)
+
+
 # --------------------------------------------------------------------------
 # 模型
 # --------------------------------------------------------------------------
-POSE_MODEL = Path(_env("POSE_MODEL", "/mnt/jl/yolov26-rk3588/model/yolo26n-pose-rk3588.rknn"))
-DETECT_MODEL = Path(_env("DETECT_MODEL", "/mnt/jl/yolov26-rk3588/model/0704-PHS.rknn"))
+POSE_MODEL = model_path("POSE_MODEL", "yolo26n-pose-rk3588.rknn",
+                        "/mnt/jl/yolov26-rk3588/model/yolo26n-pose-rk3588.rknn")
+DETECT_MODEL = model_path("DETECT_MODEL", "0704-PHS.rknn",
+                          "/mnt/jl/yolov26-rk3588/model/0704-PHS.rknn")
 
 # --------------------------------------------------------------------------
 # 输入输出
@@ -72,7 +89,7 @@ WRIST_PHONE_PIXEL_THRES = _env_float("WRIST_PHONE_PIXEL_THRES", 150.0)
 MODEL_INPUT_SIZE = _env_int("MODEL_IMGSZ", 640)
 
 
-def resolve_rknn_path(model_path) -> Path:
+def resolve_rknn_path(model_path: Path) -> Path:
     path = Path(model_path)
     if path.is_file():
         return path

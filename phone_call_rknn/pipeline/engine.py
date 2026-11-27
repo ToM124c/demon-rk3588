@@ -165,9 +165,9 @@ class _Worker(threading.Thread):
                 self.ctx = None
 
 
-def preprocess_frame(worker: _Worker, frame: Frame):
+def preprocess_frame(worker, frame: Frame, letterboxer=None):
     """把一帧送进 worker 专属的 RKNN 输入 dma-buf（fd 优先，零拷贝）。"""
-    lb = worker.letterboxer
+    lb = letterboxer or worker.letterboxer
     if frame.fd is not None:
         try:
             return lb.from_fd(frame.fd, frame.width, frame.height, frame.pixel_format, frame.wstride, frame.hstride)
@@ -217,7 +217,7 @@ def _round_timing(timing):
     return {name: {k: round(float(v), 3) for k, v in values.items()} for name, values in timing.items()}
 
 
-def _make_timing(detect_timing, pose_timing, shared_preprocess_ms=0.0):
+def make_timing(detect_timing, pose_timing, shared_preprocess_ms=0.0):
     total_pre = shared_preprocess_ms + detect_timing["preprocess_ms"] + pose_timing["preprocess_ms"]
     total_post = detect_timing["postprocess_ms"] + pose_timing["postprocess_ms"]
     total_infer = detect_timing["rknn_inference_ms"] + pose_timing["rknn_inference_ms"]
@@ -278,7 +278,7 @@ def _detect_handler(worker: _Worker, job: _Job):
         job.lease.release()
         return
 
-    timing = _make_timing(detect_timing, zero_runner_timing())
+    timing = make_timing(detect_timing, zero_runner_timing())
     _finalize(engine, worker, job.lease, job.frame_idx, job.source, frame, [], [],
               hand_dets, phone_dets, seatbelt_dets, danger, decision, matches, timing)
     job.lease.release()
@@ -315,7 +315,7 @@ def _pose_handler(worker: _Worker, job: _PoseJob):
         "postprocess_ms": (t3 - t2) * 1000.0,
         "total_runner_ms": (t3 - t0) * 1000.0,
     }
-    timing = _make_timing(job.detect_timing, pose_timing)
+    timing = make_timing(job.detect_timing, pose_timing)
     _finalize(engine, worker, job.lease, job.frame_idx, job.source, frame, persons, wrists,
               job.hand_dets, job.phone_dets, job.seatbelt_dets, danger, decision, matches, timing)
     job.lease.release()

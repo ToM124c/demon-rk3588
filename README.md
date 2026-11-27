@@ -43,9 +43,15 @@ phone_call_rknn/
 │   ├── queues.py        #   有界队列 + 帧预算 + 引用计数 Lease + 异步编码
 │   ├── simple.py        #   旧的逐帧流程（图片/视频，参考实现）
 │   └── lite_runner.py   #   RKNNLite 封装（参考实现用）
+├── escort/              # 「护送/交警手势」模式（独立业务域）
+│   ├── config.py        #   模型路径、阈值、角色/颜色/标签
+│   ├── rules.py         #   角色分配、手部分配、合规判定（纯逻辑，可单测）
+│   ├── visualize.py     #   角色框/关键点/接触线/中文状态面板
+│   ├── pipeline.py      #   hand+pose 共享一块输入 dma-buf 的零拷贝管线
+│   └── cli.py           #   python -m phone_call_rknn.escort
 └── app/
     ├── service.py       # MinIO 取流、违规时段判定、NDJSON 事件
-    ├── escort.py        # 「护送/手势」模式（外部脚本，历史路径）
+    ├── escort.py        # 「护送」模式的服务层（调 escort/pipeline）
     ├── cli.py           # 命令行参数
     └── api_test.py      # 上传 + 调接口自测
 
@@ -62,9 +68,13 @@ docs/                    # 架构与优化说明
 
 ```bash
 conda activate jl-rk3588
-pip install -r requirements.txt          # fastapi/uvicorn/minio/numpy/opencv
+pip install -r requirements.txt          # fastapi/uvicorn/minio/numpy/opencv/pillow
 python -c "from phone_call_rknn.hw.rknn import RknnContext; print('runtime ok')"
 ```
+
+模型：把 4 个 `.rknn` 放进仓库的 `model/` 目录（推荐，见 `model/README.md`），
+或用 `DETECT_MODEL` / `POSE_MODEL` / `ESCORT_DETECT_MODEL` / `ESCORT_POSE_MODEL`
+指向外部路径；两者都没有时回退到 `/mnt/jl/yolov26-rk3588/model/`。
 
 板端需要：`librknnrt.so`、`librga.so`、GStreamer `mppvideodec/mpph264enc`、
 以及系统 `python3-gi`（conda 环境会自动把 `/usr/lib/python3/dist-packages`
@@ -93,6 +103,10 @@ python -m phone_call_rknn.main_accel \
 
 # 参考链路（RKNNLite 单线程，图片或视频）
 python -m phone_call_rknn.main --source /path/images --output-dir runs/ref --no-save-vis
+
+# 护送 / 交警手势模式（hand + pose，两个模型共享一块输入 dma-buf）
+python -m phone_call_rknn.escort --source /path/escort.mp4 --output-dir runs/escort --save-vis
+python -m phone_call_rknn.escort --source /path/images --cores 2 --frame-stride 15
 ```
 
 ### 4. 自测
@@ -138,8 +152,8 @@ python tests/bench_compare.py            # 新旧管线对比
   只是不建帧对象、不进推理。
 - **`librknnrt` 与模型版本**：模型由 toolkit 2.3.2 编译，板端运行时 2.3.0，
   目前工作正常；升级模型时请同步升级 `librknnrt`（指南的「铁律」）。
-- `escort` 模式仍依赖仓库外的
-  `/mnt/jl/yolov26-rk3588/inference-police-escort-rknn-hand-assign.py`。
+- **护送模式每帧跑两个模型**：hand（~32 ms）+ pose（~120–135 ms）顺序执行，
+  单帧 ~165 ms，pose 是主要瓶颈；想要更高吞吐可以让 hand/pose 分核并行（未实现）。
 
 ## 相关文档
 

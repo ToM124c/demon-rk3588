@@ -414,14 +414,20 @@ class RknnContext:
         return tensor
 
     def bind_shared_input(self, fd: int, size: int, pass_through: bool = True,
-                          dtype: Optional[int] = None, fmt: Optional[int] = None) -> None:
-        """把外部 dma-buf 绑定为输入（多个 context 共享同一张量，零拷贝）。"""
+                          dtype: Optional[int] = None, fmt: Optional[int] = None,
+                          virt_addr: Optional[int] = None) -> None:
+        """把外部 dma-buf 绑定为输入（多个 context 共享同一张量，零拷贝）。
+
+        注意：`rknn_create_mem_from_fd` 必须给 `virt_addr`，否则 `set_io_mem`
+        会返回 RKNN_ERR_MALLOC_FAIL（2.3.0 实测）。
+        """
         if self._bound:
             raise RuntimeError(f"{self.name}: input already bound")
         attr = self._io_attr(pass_through, dtype, fmt)
         if not pass_through:
             size = int(attr.size_with_stride)
-        mem = _lib.rknn_create_mem_from_fd(self._ctx, int(fd), None, int(size), 0)
+        virt = ctypes.c_void_p(virt_addr) if virt_addr else None
+        mem = _lib.rknn_create_mem_from_fd(self._ctx, int(fd), virt, int(size), 0)
         if not mem:
             raise RuntimeError(f"{self.name}: rknn_create_mem_from_fd failed")
         _check(_lib.rknn_set_io_mem(self._ctx, mem, ctypes.byref(attr)), f"{self.name}: set_io_mem(shared)")

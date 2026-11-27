@@ -38,9 +38,6 @@ CODING_RIGHT_POLICE_ACTION = 5
 DRIVER_FRAME_STRIDE = int(os.getenv("DRIVER_FRAME_STRIDE", "15"))
 ESCORT_FRAME_STRIDE = int(os.getenv("ESCORT_FRAME_STRIDE", "15"))
 VIOLATION_MIN_FRAMES = int(os.getenv("VIOLATION_MIN_FRAMES", "5"))
-ESCORT_ROOT = Path(os.getenv("ESCORT_ROOT", "/mnt/jl/yolov26-rk3588"))
-ESCORT_SCRIPT = Path(os.getenv("ESCORT_SCRIPT", str(ESCORT_ROOT / "inference-police-escort-rknn-hand-assign.py")))
-
 
 # --------------------------------------------------------------------------
 # MinIO
