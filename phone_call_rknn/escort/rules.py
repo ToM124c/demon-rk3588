@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core.geometry import (
+from ..vision.geometry import (
     box_area,
     box_center,
     is_finite_array,
     point_dist,
     point_in_box,
 )
-from ..core.records import to_json_box, to_json_point
+from ..common.serialization import to_json_box, to_json_point
 from .config import (
     KEYPOINT_INDEX,
     LABEL_COMPLIANT,

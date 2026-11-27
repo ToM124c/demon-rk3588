@@ -9,10 +9,10 @@ import json
 
 from _util import FakeMinio, check, escort_video, hr
 
-from phone_call_rknn.app import escort as escort_service
-from phone_call_rknn.app import service
+from phone_call_rknn.driver import service as driver_service
+from phone_call_rknn.escort import service as escort_service
 from phone_call_rknn.escort.config import default_escort_config
-from phone_call_rknn.escort.pipeline import EscortPipeline
+from phone_call_rknn.escort.engine import EscortPipeline
 
 
 def main() -> int:
@@ -20,7 +20,7 @@ def main() -> int:
     fake = FakeMinio(video)
 
     # 单例管线 + 假 MinIO（避免连真实对象存储）
-    service.make_minio_client = lambda: fake
+    driver_service.make_minio_client = lambda: fake
     escort_service.make_minio_client = lambda: fake
     escort_service._pipeline = EscortPipeline(
         default_escort_config(frame_stride=60, no_save_vis=True, quiet=True)
@@ -29,7 +29,7 @@ def main() -> int:
 
     events = []
     try:
-        for line in escort_service.run_escort_analysis("unit-test.mp4"):
+        for line in escort_service.analyze_escort_video("unit-test.mp4"):
             events.append(json.loads(line))
             if len(events) >= 6:
                 break

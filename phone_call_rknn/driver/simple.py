@@ -2,13 +2,14 @@ import time
 
 import cv2
 
-from ..core.media import image_files
-from ..core.postprocess import decode_detect_outputs, decode_pose_outputs
-from ..core.preprocess import preprocess
-from ..core.records import make_frame_record, write_record
-from ..core.rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
-from ..core.timing import add_timing_sums, new_timing_sums, print_overall_speed, round_timing, zero_runner_timing
-from ..core.visualize import draw_annotations
+from ..common.media import image_files
+from ..vision.postprocess import decode_detect_outputs, decode_pose_outputs
+from ..vision.preprocess import preprocess
+from .config import DETECT_NAMES
+from .records import make_frame_record, write_record
+from .rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
+from ..common.timing import add_timing_sums, new_timing_sums, print_overall_speed, round_timing, zero_runner_timing
+from .visualize import draw_annotations
 
 
 def run_one_frame(frame, frame_idx, source_name, pose_runner, detect_runner, args):
@@ -32,7 +33,8 @@ def run_one_frame(frame, frame_idx, source_name, pose_runner, detect_runner, arg
         det_outputs, det_scale, det_pad_x, det_pad_y, detect_timing = detect_runner.infer(frame)
 
     detect_postprocess_start = time.perf_counter()
-    dets = decode_detect_outputs(det_outputs, det_scale, det_pad_x, det_pad_y, frame.shape, args.det_conf, args.iou)
+    dets = decode_detect_outputs(det_outputs, det_scale, det_pad_x, det_pad_y, frame.shape,
+                                 args.det_conf, args.iou, names=DETECT_NAMES)
     hand_dets = [det for det in dets if det["class"] == "hand"]
     phone_dets = [det for det in dets if det["class"] == "phone"]
     seatbelt_dets = [det for det in dets if det["class"] == "seatbelt"]

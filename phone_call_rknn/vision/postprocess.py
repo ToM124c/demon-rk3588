@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..config import DETECT_NAMES
 from .geometry import (
     box_center,
     maybe_sigmoid,
@@ -35,7 +34,8 @@ def as_prediction_matrix(outputs):
     return arr
 
 
-def make_detection_dicts(boxes, scores, classes, keep):
+def make_detection_dicts(boxes, scores, classes, keep, names=None):
+    names = names or {}
     dets = []
     for idx in keep:
         box = boxes[idx].astype(np.float32)
@@ -45,23 +45,23 @@ def make_detection_dicts(boxes, scores, classes, keep):
                 "box": box,
                 "center": box_center(box),
                 "conf": float(scores[idx]),
-                "class": DETECT_NAMES.get(cls_id, str(cls_id)),
+                "class": names.get(cls_id, str(cls_id)),
             }
         )
     return dets
 
 
-def _filter_boxes(boxes, scores, classes, iou_thres):
+def _filter_boxes(boxes, scores, classes, iou_thres, names=None):
     valid = (boxes[:, 2] > boxes[:, 0]) & (boxes[:, 3] > boxes[:, 1])
     boxes, scores, classes = boxes[valid], scores[valid], classes[valid]
     keep = nms_class_aware(boxes, scores, classes, iou_thres)
-    return make_detection_dicts(boxes, scores, classes, keep)
+    return make_detection_dicts(boxes, scores, classes, keep, names)
 
 
 # --------------------------------------------------------------------------
 # 浮点路径（RKNNLite / 兜底）
 # --------------------------------------------------------------------------
-def decode_detect_decoded(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres):
+def decode_detect_decoded(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres, names=None):
     pred = as_prediction_matrix(outputs)
     if pred.size == 0 or pred.shape[1] < 6:
         return None
@@ -81,12 +81,14 @@ def decode_detect_decoded(outputs, scale, pad_x, pad_y, image_shape, conf_thres,
     xyxy_ratio = np.mean((x2 > x1) & (y2 > y1))
     boxes = boxes_raw.copy() if xyxy_ratio > 0.85 else xywh_to_xyxy(boxes_raw)
     boxes = scale_boxes_to_original(boxes, scale, pad_x, pad_y, image_shape)
-    valid = (classes >= 0) & (classes < len(DETECT_NAMES))
+    valid = classes >= 0
+    if names:
+        valid = valid & (classes < len(names))
     boxes, classes, scores = boxes[valid], classes[valid], scores[valid]
-    return _filter_boxes(boxes, scores, classes, iou_thres)
+    return _filter_boxes(boxes, scores, classes, iou_thres, names)
 
 
-def decode_detect_split_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres):
+def decode_detect_split_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres, names=None):
     if outputs is None or len(outputs) < 6:
         return None
 
@@ -98,11 +100,12 @@ def decode_detect_split_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_
         cls = np.asarray(outputs[i * 2 + 1], dtype=np.float32)
         reg = np.squeeze(reg)
         cls = np.squeeze(cls)
-        if reg.ndim != 3 or cls.ndim != 3 or reg.shape[0] != 4 or cls.shape[0] < len(DETECT_NAMES):
+        if reg.ndim != 3 or cls.ndim != 3 or reg.shape[0] != 4 or cls.shape[0] < max(1, len(names or {})):
             return None
 
         _, height, width = reg.shape
-        probs = maybe_sigmoid(cls[: len(DETECT_NAMES)].reshape(len(DETECT_NAMES), -1).T)
+        n_cls = min(cls.shape[0], max(1, len(names or {})) if names else cls.shape[0])
+        probs = maybe_sigmoid(cls[:n_cls].reshape(n_cls, -1).T)
         classes = np.argmax(probs, axis=1).astype(np.int32)
         scores = probs[np.arange(len(probs)), classes]
         boxes = _decode_reg(reg, height, width, stride)
@@ -118,7 +121,7 @@ def decode_detect_split_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_
     boxes = scale_boxes_to_original(np.concatenate(boxes_all), scale, pad_x, pad_y, image_shape)
     scores = np.concatenate(scores_all)
     classes = np.concatenate(classes_all)
-    return _filter_boxes(boxes, scores, classes, iou_thres)
+    return _filter_boxes(boxes, scores, classes, iou_thres, names)
 
 
 def _decode_reg(reg, height, width, stride):
@@ -134,11 +137,11 @@ def _decode_reg(reg, height, width, stride):
     return np.stack([x1, y1, x2, y2], axis=1)
 
 
-def decode_detect_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres):
-    dets = decode_detect_decoded(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres)
+def decode_detect_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres, names=None):
+    dets = decode_detect_decoded(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres, names)
     if dets is not None:
         return dets
-    dets = decode_detect_split_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres)
+    dets = decode_detect_split_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres, names)
     if dets is not None:
         return dets
     shapes = [tuple(np.asarray(out).shape) for out in outputs]
@@ -148,7 +151,8 @@ def decode_detect_outputs(outputs, scale, pad_x, pad_y, image_shape, conf_thres,
 # --------------------------------------------------------------------------
 # 量化路径（want_float=0）
 # --------------------------------------------------------------------------
-def decode_detect_quantized(outputs, infos, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres):
+def decode_detect_quantized(outputs, infos, scale, pad_x, pad_y, image_shape, conf_thres, iou_thres,
+                            names=None):
     """6 输出（4 回归 + 3 分类/stride）的 int8 解码，只在候选行上反量化。"""
     n = len(outputs)
     if n < 6 or n % 2 != 0:
@@ -164,7 +168,7 @@ def decode_detect_quantized(outputs, infos, scale, pad_x, pad_y, image_shape, co
         if reg_q.ndim != 3 or cls_q.ndim != 3:
             raise RuntimeError(f"unexpected quantized output shape {reg_q.shape}/{cls_q.shape}")
 
-        n_cls = min(int(cls_q.shape[0]), len(DETECT_NAMES))
+        n_cls = min(int(cls_q.shape[0]), max(1, len(names)) if names else int(cls_q.shape[0]))
         cls_slice = cls_q[:n_cls].astype(np.int16)
         cls_idx = np.argmax(cls_slice, axis=0)                      # int 域 argmax == float 域 argmax
         q_max = np.take_along_axis(cls_slice, cls_idx[None], axis=0)[0]
@@ -186,7 +190,7 @@ def decode_detect_quantized(outputs, infos, scale, pad_x, pad_y, image_shape, co
     boxes = scale_boxes_to_original(np.concatenate(boxes_all), scale, pad_x, pad_y, image_shape)
     scores = np.concatenate(scores_all)
     classes = np.concatenate(classes_all).astype(np.int32)
-    return _filter_boxes(boxes, scores, classes, iou_thres)
+    return _filter_boxes(boxes, scores, classes, iou_thres, names)
 
 
 def _decode_reg_quantized(reg_q, info, height, width, stride):

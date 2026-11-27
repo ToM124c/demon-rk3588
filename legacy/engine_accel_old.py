@@ -18,20 +18,21 @@ from legacy.rknn_multi_threaded.rga_helper import get_rga_letterbox
 from legacy.rknn_multi_threaded.vpu_capture import NV12Frame, open_vpu_capture
 from legacy.rknn_multi_threaded.vpu_writer import open_video_writer
 
-from phone_call_rknn.config import (
+from phone_call_rknn.driver.config import (
     DETECT_MODEL,
+    DETECT_NAMES,
     PHONE_HAND_IOU_THRES,
     PHONE_HAND_PIXEL_THRES,
     POSE_MODEL,
     WRIST_PHONE_PIXEL_THRES,
-    resolve_rknn_path,
 )
-from phone_call_rknn.core.postprocess import decode_detect_outputs, decode_pose_outputs
-from phone_call_rknn.core.preprocess import letterbox
-from phone_call_rknn.core.records import make_frame_record
-from phone_call_rknn.core.rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
-from phone_call_rknn.core.timing import round_timing, zero_runner_timing
-from phone_call_rknn.core.visualize import draw_annotations
+from phone_call_rknn.common.config import resolve_rknn_path
+from phone_call_rknn.vision.postprocess import decode_detect_outputs, decode_pose_outputs
+from phone_call_rknn.vision.preprocess import letterbox
+from phone_call_rknn.driver.records import make_frame_record
+from phone_call_rknn.driver.rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
+from phone_call_rknn.common.timing import round_timing, zero_runner_timing
+from phone_call_rknn.driver.visualize import draw_annotations
 
 
 CORE_MASKS = {
@@ -300,7 +301,8 @@ def detect_task(rknn, item, args):
         return make_result(frame_idx, source_name, bgr, [], [], [], [], [], False, "invalid_detect_outputs", [], timing, need_vis)
 
     postprocess_start = time.perf_counter()
-    dets = decode_detect_outputs(outputs, scale, pad_x, pad_y, frame_shape(bgr), args.det_conf, args.iou)
+    dets = decode_detect_outputs(outputs, scale, pad_x, pad_y, frame_shape(bgr),
+                                 args.det_conf, args.iou, names=DETECT_NAMES)
     hand_dets = [det for det in dets if det["class"] == "hand"]
     phone_dets = [det for det in dets if det["class"] == "phone"]
     seatbelt_dets = [det for det in dets if det["class"] == "seatbelt"]

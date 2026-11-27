@@ -1,6 +1,6 @@
 """接口自测：上传视频到 MinIO 并跑一遍 NDJSON 流。
 
-    python -m phone_call_rknn.api_server --video test.mp4 --mode driver --http
+    python -m phone_call_rknn.api_test --video test.mp4 --mode driver --http
 """
 
 from __future__ import annotations
@@ -13,8 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
-from ..config import DEFAULT_SOURCE
-from .service import MODE_DRIVER, MODE_ESCORT, stream_task, upload_video_to_minio
+from .app.api_server import stream_task
+from .common.constants import MODE_DRIVER, MODE_ESCORT
+from .common.storage import upload_video_to_minio
+from .driver.config import DEFAULT_SOURCE
 
 
 @dataclass

@@ -9,6 +9,6 @@
 """
 
 from .config import EscortConfig, default_escort_config
-from .pipeline import EscortPipeline, EscortResult
+from .engine import EscortPipeline, EscortResult
 
 __all__ = ["EscortConfig", "default_escort_config", "EscortPipeline", "EscortResult"]

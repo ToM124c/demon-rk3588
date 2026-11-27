@@ -1,8 +1,4 @@
-"""护送 / 交警手势模式的服务层：MinIO 取流 → 推理 → NDJSON 事件。
-
-推理在 `phone_call_rknn.escort` 包里（仓库内，零拷贝），这里只负责
-「取流 → 抽帧 → 违规时段聚合 → 事件」。
-"""
+"""护送 / 交警手势模式的服务层：MinIO 取流 → 引擎 → NDJSON 事件。"""
 
 from __future__ import annotations
 
@@ -11,24 +7,23 @@ import threading
 from pathlib import Path
 from typing import Iterator, Optional
 
-from ..escort import EscortPipeline, default_escort_config
-from ..escort.visualize import annotate_frame
-from .service import (
+from ..common.config import env_int
+from ..common.constants import MODE_ESCORT
+from ..common.events import base_event, completion_events, ndjson_event, violation_period_event
+from ..common.media import probe_video_fps
+from ..common.storage import download_video, make_minio_client
+from ..common.tracking import ViolationPeriodTracker
+from .config import (
     CODING_LEFT_POLICE_ACTION,
     CODING_RIGHT_POLICE_ACTION,
     CODING_SUSPECT_HAND,
-    ESCORT_FRAME_STRIDE,
-    MODE_ESCORT,
-    VIDEO_BUCKET,
-    ViolationPeriodTracker,
-    base_event,
-    completion_events,
-    escort_codings_from_record,
-    make_minio_client,
-    ndjson_event,
-    probe_video_fps,
-    violation_period_event,
+    default_escort_config,
 )
+from .engine import EscortPipeline
+from .visualize import annotate_frame
+
+ESCORT_FRAME_STRIDE = env_int("ESCORT_FRAME_STRIDE", 15)
+VIOLATION_MIN_FRAMES = env_int("VIOLATION_MIN_FRAMES", 5)
 
 _pipeline_lock = threading.Lock()
 _pipeline: Optional[EscortPipeline] = None
@@ -54,8 +49,15 @@ def release_escort() -> None:
         _pipeline = None
 
 
-# 兼容旧名字（api_server 曾用 release_escort_runners）
-release_escort_runners = release_escort
+def escort_codings_from_record(record) -> list[int]:
+    codings = []
+    if not record["suspect_hand_ok"]:
+        codings.append(CODING_SUSPECT_HAND)
+    if not record["left_police_action_ok"]:
+        codings.append(CODING_LEFT_POLICE_ACTION)
+    if not record["right_police_action_ok"]:
+        codings.append(CODING_RIGHT_POLICE_ACTION)
+    return codings
 
 
 def _visualize_on(frame, result):
@@ -70,19 +72,18 @@ def _visualize_on(frame, result):
     )
 
 
-def run_escort_analysis(task_id: str) -> Iterator[str]:
+def analyze_escort_video(task_id: str) -> Iterator[str]:
     client = make_minio_client()
     with tempfile.TemporaryDirectory(prefix="police_escort_") as temp_dir:
         work_dir = Path(temp_dir)
-        local_video = work_dir / Path(task_id).name
-        client.fget_object(VIDEO_BUCKET, task_id, str(local_video))
+        local_video = download_video(client, task_id, work_dir / Path(task_id).name)
 
         yield ndjson_event(base_event("stage_start", task_id, MODE_ESCORT))
         fps = probe_video_fps(local_video)
         completion_seconds = 0.0
         tracker = ViolationPeriodTracker(
             (CODING_SUSPECT_HAND, CODING_LEFT_POLICE_ACTION, CODING_RIGHT_POLICE_ACTION),
-            client, task_id, work_dir,
+            client, task_id, work_dir, min_frames=VIOLATION_MIN_FRAMES,
         )
 
         with _pipeline_lock:
@@ -103,3 +104,8 @@ def run_escort_analysis(task_id: str) -> Iterator[str]:
         for period in tracker.finish():
             yield violation_period_event(task_id, MODE_ESCORT, period)
         yield from completion_events(task_id, MODE_ESCORT, completion_seconds)
+
+
+def analyze_video(task_id: str) -> Iterator[str]:
+    """兼容旧接口名。"""
+    yield from analyze_escort_video(task_id)

@@ -11,8 +11,8 @@ import time
 
 from _util import check, hr, test_video
 
-from phone_call_rknn.config import EngineConfig
-from phone_call_rknn.pipeline.engine import AccelEngine
+from phone_call_rknn.driver.config import EngineConfig
+from phone_call_rknn.driver.engine import AccelEngine
 
 
 def main() -> int:

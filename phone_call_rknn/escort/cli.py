@@ -17,7 +17,7 @@ if __package__ in (None, ""):
 
 import cv2
 
-from ..core.media import image_files, is_video
+from ..common.media import image_files, is_video
 from ..hw.gst import open_writer
 from .config import (
     DEFAULT_OUTPUT_DIR,
@@ -26,7 +26,7 @@ from .config import (
     ESCORT_POSE_MODEL,
     EscortConfig,
 )
-from .pipeline import EscortPipeline
+from .engine import EscortPipeline
 
 
 def parse_args(argv=None):

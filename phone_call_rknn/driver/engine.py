@@ -17,17 +17,18 @@ from typing import Iterator, List, Optional
 
 import numpy as np
 
-from ..config import EngineConfig
-from ..core.postprocess import decode_detect_quantized, decode_pose_half
-from ..core.records import make_frame_record
-from ..core.rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
-from ..core.timing import zero_runner_timing
-from ..core.visualize import draw_annotations
+from ..common.timing import make_timing, round_timing, zero_runner_timing
 from ..hw.frame import Frame, frame_to_bgr
 from ..hw.gst import open_capture
-from ..hw.rga import Im2d, Letterboxer, RK_FORMAT_BGR_888
-from ..hw.rknn import (CORE_MASKS, TENSOR_NHWC, TENSOR_UINT8, RknnContext)
-from .queues import AsyncWriter, BoundedQueue, FrameBudget, Lease
+from ..hw.rga import Im2d, Letterboxer
+from ..hw.rknn import CORE_MASKS, TENSOR_NHWC, TENSOR_UINT8, RknnContext
+from ..pipeline.frames import preprocess_frame
+from ..pipeline.queues import AsyncWriter, BoundedQueue, FrameBudget, Lease
+from ..vision.postprocess import decode_detect_quantized, decode_pose_half
+from .config import DETECT_NAMES, EngineConfig
+from .records import make_frame_record
+from .rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
+from .visualize import draw_annotations
 
 _SKIP = object()
 
@@ -165,39 +166,13 @@ class _Worker(threading.Thread):
                 self.ctx = None
 
 
-def preprocess_frame(worker, frame: Frame, letterboxer=None):
-    """把一帧送进 worker 专属的 RKNN 输入 dma-buf（fd 优先，零拷贝）。"""
-    lb = letterboxer or worker.letterboxer
-    if frame.fd is not None:
-        try:
-            return lb.from_fd(frame.fd, frame.width, frame.height, frame.pixel_format, frame.wstride, frame.hstride)
-        except RuntimeError:
-            # 10bit 等 RGA 不支持的格式：退回 CPU 转 BGR 再走 RGA
-            bgr = frame_to_bgr(frame, im2d=worker.im2d)
-            src = worker.im2d.wrap_va(bgr, frame.width, frame.height, frame.width, frame.height, RK_FORMAT_BGR_888)
-            try:
-                return lb.from_buffer(src, frame.width, frame.height)
-            finally:
-                worker.im2d.release(src)
-    if frame.va is not None:
-        if frame.va.ndim == 3:
-            src = worker.im2d.wrap_va(frame.va, frame.width, frame.height, frame.width, frame.height,
-                                      RK_FORMAT_BGR_888)
-            try:
-                return lb.from_buffer(src, frame.width, frame.height)
-            finally:
-                worker.im2d.release(src)
-        return lb.from_nv12(frame.va, frame.width, frame.height, frame.pixel_format)
-    raise RuntimeError("frame has neither dma-buf fd nor CPU buffer")
-
-
 def _finalize(engine: "AccelEngine", worker: _Worker, lease: Lease, frame_idx: int, source: str,
               frame: Frame, persons, wrists, hand_dets, phone_dets, seatbelt_dets,
               danger, decision, matches, timing):
     cfg = engine.config
     record = make_frame_record(frame_idx, source, persons, wrists, hand_dets, phone_dets,
                                seatbelt_dets, danger, matches, decision)
-    record["timing"] = _round_timing(timing)
+    record["timing"] = round_timing(timing)
 
     vis = None
     if not cfg.no_save_vis or cfg.display:
@@ -213,29 +188,6 @@ def _finalize(engine: "AccelEngine", worker: _Worker, lease: Lease, frame_idx: i
     engine._emit(result, lease)
 
 
-def _round_timing(timing):
-    return {name: {k: round(float(v), 3) for k, v in values.items()} for name, values in timing.items()}
-
-
-def make_timing(detect_timing, pose_timing, shared_preprocess_ms=0.0):
-    total_pre = shared_preprocess_ms + detect_timing["preprocess_ms"] + pose_timing["preprocess_ms"]
-    total_post = detect_timing["postprocess_ms"] + pose_timing["postprocess_ms"]
-    total_infer = detect_timing["rknn_inference_ms"] + pose_timing["rknn_inference_ms"]
-    total = total_pre + total_post + total_infer
-    return {
-        "pose": pose_timing,
-        "detect": detect_timing,
-        "total": {
-            "shared_preprocess_ms": shared_preprocess_ms,
-            "preprocess_ms": total_pre,
-            "postprocess_ms": total_post,
-            "rknn_inference_ms": total_infer,
-            "total_runner_ms": total,
-            "runner_fps": 1000.0 / total if total > 0 else 0.0,
-        },
-    }
-
-
 def _detect_handler(worker: _Worker, job: _Job):
     engine = worker.engine
     cfg = engine.config
@@ -245,13 +197,13 @@ def _detect_handler(worker: _Worker, job: _Job):
     frame = job.lease.frame
 
     t0 = time.perf_counter()
-    _rgb, scale, pad_x, pad_y = preprocess_frame(worker, frame)
+    _rgb, scale, pad_x, pad_y = preprocess_frame(worker.letterboxer, frame, worker.im2d)
     t1 = time.perf_counter()
     outputs = ctx.run()
     t2 = time.perf_counter()
     dets = decode_detect_quantized(
         outputs, ctx.outputs, scale, pad_x, pad_y,
-        (frame.height, frame.width, 3), cfg.det_conf, cfg.iou,
+        (frame.height, frame.width, 3), cfg.det_conf, cfg.iou, names=DETECT_NAMES,
     )
     t3 = time.perf_counter()
 
@@ -296,7 +248,7 @@ def _pose_handler(worker: _Worker, job: _PoseJob):
     frame = job.lease.frame
 
     t0 = time.perf_counter()
-    _rgb, scale, pad_x, pad_y = preprocess_frame(worker, frame)
+    _rgb, scale, pad_x, pad_y = preprocess_frame(worker.letterboxer, frame, worker.im2d)
     t1 = time.perf_counter()
     outputs = ctx.run()
     t2 = time.perf_counter()

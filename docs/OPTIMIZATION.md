@@ -52,7 +52,7 @@ im2d.process(src_nv12, dst_rgb,
 - detect 的 6 个输出是 **INT8**，直接 `np.ctypeslib.as_array().copy()`；
 - pose 的输出是 **FP16**（模型输出未量化），按 float16 视图取出。
 
-后处理在量化域里做筛选（`core/postprocess.py`）：
+后处理在量化域里做筛选（`vision/postprocess.py`）：
 
 ```python
 cls_i = cls_q[:n_cls].astype(np.int16)

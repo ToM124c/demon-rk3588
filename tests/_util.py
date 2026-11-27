@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from phone_call_rknn.config import DEFAULT_SOURCE  # noqa: E402
+from phone_call_rknn.driver.config import DEFAULT_SOURCE  # noqa: E402
 from phone_call_rknn.escort.config import DEFAULT_SOURCE as DEFAULT_ESCORT_SOURCE  # noqa: E402
 
 

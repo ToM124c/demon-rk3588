@@ -11,7 +11,7 @@ import numpy as np
 
 from _util import check, hr, test_video
 
-from phone_call_rknn.config import DETECT_MODEL, POSE_MODEL
+from phone_call_rknn.driver.config import DETECT_MODEL, POSE_MODEL
 from phone_call_rknn.hw.gst import DmaBufCapture
 from phone_call_rknn.hw.rga import Letterboxer
 from phone_call_rknn.hw.rknn import CORE_0_1_2, TENSOR_NHWC, TENSOR_UINT8, RknnContext, dequantize

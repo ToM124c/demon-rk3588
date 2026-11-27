@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from minio import Minio
 
 from phone_call_rknn.accel_pipeline import AccelConfig, create_thread_pools, iter_accel_video_results
-from phone_call_rknn.config import DEFAULT_SOURCE
+from phone_call_rknn.driver.config import DEFAULT_SOURCE
 
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://192.17.110.253:30090")

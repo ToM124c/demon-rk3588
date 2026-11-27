@@ -28,36 +28,58 @@ CSC 预处理 → NPU 推理（零拷贝 + int8 原始输出）→ 业务判定*
 
 ```
 phone_call_rknn/
-├── config.py            # 模型路径、阈值、EngineConfig（全部可用环境变量覆盖）
-├── api_server.py        # FastAPI 入口（uvicorn phone_call_rknn.api_server:app）
-├── main_accel.py        # 加速链路 CLI（推荐）
-├── main.py              # 参考链路 CLI（RKNNLite 单线程，逐帧 numpy）
-├── hw/                  # 硬件后端（只依赖 Rockchip 运行时）
-│   ├── rknn.py          #   librknnrt 的 ctypes 绑定：零拷贝 IO + int8 输出
-│   ├── rga.py           #   librga im2d：fd 包装、单次 improcess、letterbox
-│   ├── gst.py           #   GStreamer：dma-buf appsink 采集 / mpph264enc 硬编
-│   └── frame.py         #   Frame（fd/va/stride）与按需 BGR 转换
-├── core/                # 与硬件无关：postprocess/geometry/rules/records/timing/visualize
-├── pipeline/
-│   ├── engine.py        #   零拷贝流水线编排（每核一线程）
-│   ├── queues.py        #   有界队列 + 帧预算 + 引用计数 Lease + 异步编码
-│   ├── simple.py        #   旧的逐帧流程（图片/视频，参考实现）
-│   └── lite_runner.py   #   RKNNLite 封装（参考实现用）
-├── escort/              # 「护送/交警手势」模式（独立业务域）
-│   ├── config.py        #   模型路径、阈值、角色/颜色/标签
-│   ├── rules.py         #   角色分配、手部分配、合规判定（纯逻辑，可单测）
-│   ├── visualize.py     #   角色框/关键点/接触线/中文状态面板
-│   ├── pipeline.py      #   hand+pose 共享一块输入 dma-buf 的零拷贝管线
-│   └── cli.py           #   python -m phone_call_rknn.escort
-└── app/
-    ├── service.py       # MinIO 取流、违规时段判定、NDJSON 事件
-    ├── escort.py        # 「护送」模式的服务层（调 escort/pipeline）
-    ├── cli.py           # 命令行参数
-    └── api_test.py      # 上传 + 调接口自测
+├── api_server.py        # uvicorn 入口 shim（app/api_server:app）
+├── main_accel.py        # 兼容入口 -> driver 加速链路
+├── main.py              # 兼容入口 -> driver 参考链路
+├── api_test.py          # 上传 MinIO + 调接口自测
+├── common/              # 两个模式共享的基础设施（无业务语义）
+│   ├── config.py        #   env 解析、项目路径、模型路径
+│   ├── constants.py     #   stage / mode 常量
+│   ├── events.py        #   NDJSON 事件
+│   ├── storage.py       #   MinIO 取流/存图
+│   ├── tracking.py      #   违规时段聚合
+│   ├── media.py         #   图片/视频识别、fps 探测
+│   ├── serialization.py #   坐标 JSON 化
+│   ├── fonts.py         #   中文字体
+│   └── timing.py        #   耗时结构
+├── vision/              # 模型输出解码（纯 numpy，不依赖 hw）
+│   ├── geometry.py      #   框/点/NMS 工具
+│   ├── postprocess.py   #   detect/pose 解码（浮点 + 量化两条路径）
+│   └── preprocess.py    #   CPU letterbox（参考实现）
+├── hw/                  # 硬件层
+│   ├── rknn.py          #   librknnrt ctypes 绑定（零拷贝 + int8 输出）
+│   ├── rga.py           #   librga im2d（fd 包装、单次 improcess）
+│   ├── gst.py           #   GStreamer dma-buf 采集 / mpph264enc 硬编
+│   └── frame.py         #   Frame（fd/va/stride）与按需 BGR
+├── pipeline/            # 编排原语
+│   ├── queues.py        #   有界队列 / 帧预算 / Lease / 异步编码
+│   └── frames.py        #   帧 -> 模型输入（fd 优先的 RGA 预处理）
+├── driver/              # ① 司机行为模式（打电话 / 安全带）
+│   ├── config.py        #   EngineConfig、阈值、关键点、DETECT_NAMES
+│   ├── engine.py        #   零拷贝引擎（detect→pose 条件分支）
+│   ├── rules.py         #   手/手机/安全带判定
+│   ├── records.py       #   单帧 JSON 记录
+│   ├── visualize.py     #   标注绘制
+│   ├── service.py       #   MinIO → NDJSON（含违规时段）
+│   ├── cli.py           #   命令行（加速 + 参考链路）
+│   ├── simple.py        #   参考链路实现（RKNNLite 单线程）
+│   ├── lite_runner.py   #   RKNNLite 封装
+│   └── __main__.py      #   python -m phone_call_rknn.driver
+├── escort/              # ② 护送 / 交警手势模式
+│   ├── config.py        #   模型、阈值、角色/颜色/标签
+│   ├── engine.py        #   hand + pose 共享输入 dma-buf 的管线
+│   ├── rules.py         #   角色分配、手部归属、合规判定
+│   ├── visualize.py     #   角色框/接触线/中文状态面板
+│   ├── service.py       #   MinIO → NDJSON
+│   ├── cli.py           #   命令行
+│   └── __main__.py      #   python -m phone_call_rknn.escort
+└── app/                 # HTTP 层（薄）
+    └── api_server.py    #   FastAPI + 按 mode 分发到 driver/escort
 
 tests/                   # 验证脚本与基准（见 tests/README.md）
-legacy/                  # 历史实现留档：旧加速管线、rknn_multi_threaded 副本等
+legacy/                  # 历史实现留档（旧加速管线、rknn_multi_threaded 副本等）
 docs/                    # 架构与优化说明
+typings/gi/              # PyGObject 类型桩（消除 IDE 波浪线）
 ```
 
 ---
@@ -97,12 +119,12 @@ curl -N "http://127.0.0.1:8000/analyze/37ecab44-9e0a-4488-9ad1-0fd1cb832ef4.mp4?
 
 ```bash
 # 加速链路（推荐）：输出 frame_results.jsonl，可选可视化视频
-python -m phone_call_rknn.main_accel \
+python -m phone_call_rknn.driver \
   --source /path/video.mp4 --output-dir runs/demo \
   --frame-stride 15 --detect-cores 0,1 --pose-cores 2 --save-vis
 
 # 参考链路（RKNNLite 单线程，图片或视频）
-python -m phone_call_rknn.main --source /path/images --output-dir runs/ref --no-save-vis
+python -m phone_call_rknn.driver --simple --source /path/images --output-dir runs/ref --no-save-vis
 
 # 护送 / 交警手势模式（hand + pose，两个模型共享一块输入 dma-buf）
 python -m phone_call_rknn.escort --source /path/escort.mp4 --output-dir runs/escort --save-vis

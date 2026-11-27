@@ -18,14 +18,15 @@ from typing import Iterator, List, Optional
 
 import numpy as np
 
-from ..core.postprocess import decode_detect_quantized, decode_pose_half
+from ..common.timing import make_timing, round_timing
 from ..hw.frame import Frame, frame_to_bgr
 from ..hw.gst import open_capture
 from ..hw.rga import Im2d, Letterboxer
 from ..hw.rknn import CORE_MASKS, TENSOR_NHWC, TENSOR_UINT8, RknnContext
-from ..pipeline.engine import make_timing, preprocess_frame
+from ..pipeline.frames import preprocess_frame
 from ..pipeline.queues import AsyncWriter, BoundedQueue, FrameBudget, Lease
-from .config import LABEL_COMPLIANT, EscortConfig
+from ..vision.postprocess import decode_detect_quantized, decode_pose_half
+from .config import HAND_CLASSES, LABEL_COMPLIANT, EscortConfig
 from .rules import (
     assign_hands_to_roles,
     assign_roles_by_right_shoulder,
@@ -189,12 +190,12 @@ class _EscortWorker(threading.Thread):
         shape = (frame.height, frame.width, 3)
 
         t0 = time.perf_counter()
-        _rgb, scale, pad_x, pad_y = preprocess_frame(self, frame, self.letterboxer)
+        _rgb, scale, pad_x, pad_y = preprocess_frame(self.letterboxer, frame, self.im2d)
         shared_pre_ms = (time.perf_counter() - t0) * 1000.0
         extra_pre_ms = 0.0
         if self.pose_letterboxer is not None:
             t = time.perf_counter()
-            _rgb2, p_scale, p_pad_x, p_pad_y = preprocess_frame(self, frame, self.pose_letterboxer)
+            _rgb2, p_scale, p_pad_x, p_pad_y = preprocess_frame(self.pose_letterboxer, frame, self.im2d)
             extra_pre_ms = (time.perf_counter() - t) * 1000.0
         else:
             p_scale, p_pad_x, p_pad_y = scale, pad_x, pad_y
@@ -206,7 +207,8 @@ class _EscortWorker(threading.Thread):
         t3 = time.perf_counter()
 
         dets = decode_detect_quantized(
-            det_outputs, detect.outputs, scale, pad_x, pad_y, shape, cfg.det_conf, cfg.iou
+            det_outputs, detect.outputs, scale, pad_x, pad_y, shape, cfg.det_conf, cfg.iou,
+            names=HAND_CLASSES,
         )
         hand_dets = [det for det in dets if det["class"] == "hand"]
         t4 = time.perf_counter()
@@ -236,8 +238,7 @@ class _EscortWorker(threading.Thread):
             "postprocess_ms": pose_post_ms,
             "total_runner_ms": pose_infer_ms + pose_post_ms,
         }
-        timing = make_timing(detect_timing, pose_timing, shared_pre_ms)
-        timing = {name: {k: round(float(v), 3) for k, v in values.items()} for name, values in timing.items()}
+        timing = round_timing(make_timing(detect_timing, pose_timing, shared_pre_ms))
         record = make_frame_record(job.frame_idx, job.source, roles, hand_dets, frame_result, timing)
 
         analysis = {"roles": roles, "pose_people": pose_people, "hand_dets": hand_dets,

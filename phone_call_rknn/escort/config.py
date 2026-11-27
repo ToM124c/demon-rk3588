@@ -8,38 +8,10 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..config import model_path
-
-
-def _env(name: str, default):
-    value = os.environ.get(name)
-    return default if value is None or value == "" else value
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(_env(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    try:
-        return float(_env(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "no", "off"}
-
+from ..common.config import env_bool, env_float, env_int, env_str, model_path
 
 # --------------------------------------------------------------------------
 # 模型与输出
@@ -49,11 +21,16 @@ ESCORT_POSE_MODEL = model_path("ESCORT_POSE_MODEL", "0710-escort-pose-rk3588.rkn
 ESCORT_HAND_MODEL = model_path("ESCORT_DETECT_MODEL", "0710-escort-hand.rknn",
                                "/mnt/jl/yolov26-rk3588/model/0710-escort-hand.rknn")
 
-DEFAULT_SOURCE = _env("ESCORT_SOURCE", "/mnt/jl/yolov26-rk3588/video/test-2/test-escort-3.mp4")
-DEFAULT_OUTPUT_DIR = Path(_env("ESCORT_OUTPUT_DIR", "/mnt/jl/yolov26-rk3588/runs/escort"))
+DEFAULT_SOURCE = env_str("ESCORT_SOURCE", "/mnt/jl/yolov26-rk3588/video/test-2/test-escort-3.mp4")
+DEFAULT_OUTPUT_DIR = Path(env_str("ESCORT_OUTPUT_DIR", "/mnt/jl/yolov26-rk3588/runs/escort"))
 
 LABEL_COMPLIANT = "compliant"
 LABEL_NON_COMPLIANT = "non_compliant"
+
+# 违规编码（与上游约定一致）
+CODING_SUSPECT_HAND = 3
+CODING_LEFT_POLICE_ACTION = 4
+CODING_RIGHT_POLICE_ACTION = 5
 
 # --------------------------------------------------------------------------
 # 关键点 / 角色 / 颜色
@@ -95,6 +72,9 @@ TARGET_LABELS = {
     "right_elbow": "右肘",
 }
 
+# 单类 hand 模型：0 就是 hand
+HAND_CLASSES = {0: "hand"}
+
 
 # --------------------------------------------------------------------------
 # 运行配置
@@ -105,23 +85,23 @@ class EscortConfig:
     hand_model: Path = ESCORT_HAND_MODEL
     imgsz: int = 640
 
-    det_conf: float = _env_float("ESCORT_DET_CONF", 0.30)
-    person_conf: float = _env_float("ESCORT_PERSON_CONF", 0.25)
-    kpt_conf: float = _env_float("ESCORT_KPT_CONF", 0.30)
-    iou: float = _env_float("ESCORT_IOU", 0.45)
-    hand_max_pixel_dist: float = _env_float("ESCORT_HAND_MAX_PIXEL_DIST", 180.0)
-    contact_pixel_thres: float = _env_float("ESCORT_CONTACT_PIXEL_THRES", 95.0)
+    det_conf: float = env_float("ESCORT_DET_CONF", 0.30)
+    person_conf: float = env_float("ESCORT_PERSON_CONF", 0.25)
+    kpt_conf: float = env_float("ESCORT_KPT_CONF", 0.30)
+    iou: float = env_float("ESCORT_IOU", 0.45)
+    hand_max_pixel_dist: float = env_float("ESCORT_HAND_MAX_PIXEL_DIST", 180.0)
+    contact_pixel_thres: float = env_float("ESCORT_CONTACT_PIXEL_THRES", 95.0)
 
     # 一个 worker 同时跑 hand + pose，绑在同一个 NPU 核上；多个核用逗号分隔
-    cores: str = _env("ESCORT_CORES", "2")
-    zero_copy: bool = _env_bool("ZERO_COPY", True)
-    decode: str = _env("ESCORT_DECODE", "vpu")
-    codec: str = _env("ESCORT_CODEC", "h264")
-    frame_stride: int = _env_int("ESCORT_FRAME_STRIDE", 1)
-    decode_queue: int = _env_int("ESCORT_DECODE_QUEUE", 4)
-    frame_budget: int = _env_int("ESCORT_FRAME_BUDGET", 6)
-    encode_queue: int = _env_int("ESCORT_ENCODE_QUEUE", 2)
-    npu_warmup: int = _env_int("ESCORT_NPU_WARMUP", 3)
+    cores: str = env_str("ESCORT_CORES", "2")
+    zero_copy: bool = env_bool("ZERO_COPY", True)
+    decode: str = env_str("ESCORT_DECODE", "vpu")
+    codec: str = env_str("ESCORT_CODEC", "h264")
+    frame_stride: int = env_int("ESCORT_FRAME_STRIDE", 1)
+    decode_queue: int = env_int("ESCORT_DECODE_QUEUE", 4)
+    frame_budget: int = env_int("ESCORT_FRAME_BUDGET", 6)
+    encode_queue: int = env_int("ESCORT_ENCODE_QUEUE", 2)
+    npu_warmup: int = env_int("ESCORT_NPU_WARMUP", 3)
 
     no_save_vis: bool = True
     quiet: bool = True

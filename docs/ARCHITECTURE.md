@@ -3,18 +3,35 @@
 ## 分层
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ app/        FastAPI / NDJSON 事件 / MinIO / 违规时段跟踪    │
-├──────────────────────────────────────────────────────────┤
-│ pipeline/   编排：解码线程 → 推理 worker → 结果重排 → 输出   │
-├──────────────────────────────────────────────────────────┤
-│ hw/         硬件后端：GStreamer(dma-buf) / RGA im2d / RKNN  │
-├──────────────────────────────────────────────────────────┤
-│ core/       与硬件无关：后处理、几何、规则、记录、可视化      │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ app/       HTTP 层：FastAPI + 按 mode 分发                       │
+├────────────────────────────────────────────────────────────────┤
+│ driver/    司机模式：规则/记录/可视化/引擎/服务/CLI               │
+│ escort/    护送模式：角色/手部/合规/引擎/服务/CLI                 │
+├────────────────────────────────────────────────────────────────┤
+│ pipeline/  编排原语：有界队列、帧预算、Lease、帧预处理            │
+├────────────────────────────────────────────────────────────────┤
+│ vision/    模型输出解码（纯 numpy，可离线单测）                   │
+├────────────────────────────────────────────────────────────────┤
+│ hw/        硬件后端：GStreamer(dma-buf) / RGA im2d / RKNN        │
+├────────────────────────────────────────────────────────────────┤
+│ common/    跨模式基础设施：配置/事件/存储/时段/媒体/字体/耗时      │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-`core/` 不 import `hw/`，因此后处理可以在任意机器上单测。
+依赖方向严格自上而下：`driver|escort` → `pipeline|vision` → `hw`；
+`common` 被所有层引用但**不反向依赖**任何业务包。`vision/` 不 import `hw/`，
+所以后处理可以在没有 NPU 的机器上单测。
+
+两个模式的边界：
+
+| | driver | escort |
+|---|---|---|
+| 模型 | detect(hand/phone/seatbelt) + pose | hand(单类) + pose |
+| 每帧推理 | detect 必跑，pose 只在“单手持机”分支按需跑 | hand + pose 都跑，共享一块输入 dma-buf |
+| 判定产物 | `danger` + `coding` 1/2 | `label` + `coding` 3/4/5 |
+| 服务 | `driver/service.py` | `escort/service.py` |
+| 入口 | `python -m phone_call_rknn.driver` | `python -m phone_call_rknn.escort` |
 
 ## 数据流（零拷贝路径）
 
@@ -35,7 +52,7 @@ mppvideodec ──► video/x-raw(memory:DMABuf), NV12
 NPU: rknn_run(input dma-buf) ──► int8 / fp16 原始输出
    │
    ▼
-core.postprocess（量化域筛选 + 只反量化候选行）──► 判定 ──► 事件/可视化
+vision.postprocess（量化域筛选 + 只反量化候选行）──► 判定 ──► 事件/可视化
 ```
 
 **非零拷贝路径**（`ZERO_COPY=0` 或摄像头）：OpenCV `CAP_GSTREAMER` 的 appsink
@@ -112,7 +129,7 @@ dma-buf 帧 ──RGA improcess──► 输入 dma-buf（640x640 RGB, uint8）
 
 ## 事件层
 
-`app/service.py` 把 `FrameResult` 转成业务事件：
+`driver/service.py` / `escort/service.py` 把结果转成业务事件：
 
 ```
 stage_start → violation(可能多条) → completed → all_completed

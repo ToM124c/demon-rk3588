@@ -19,7 +19,7 @@ from pathlib import Path
 from _util import check, escort_video, hr
 
 from phone_call_rknn.escort.config import EscortConfig, LABEL_COMPLIANT, LABEL_NON_COMPLIANT
-from phone_call_rknn.escort.pipeline import EscortPipeline
+from phone_call_rknn.escort.engine import EscortPipeline
 
 LEGACY_SCRIPT = os.environ.get(
     "ESCORT_LEGACY_SCRIPT", "/mnt/jl/yolov26-rk3588/inference-police-escort-rknn-hand-assign.py"

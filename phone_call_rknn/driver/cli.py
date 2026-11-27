@@ -1,11 +1,27 @@
-"""命令行参数：加速链路（EngineConfig）与简单链路（SimpleArgs）各一套。"""
+"""司机模式命令行入口。
+
+    python -m phone_call_rknn.driver                     # 加速链路
+    python -m phone_call_rknn.driver --save-vis          # 加速链路 + 可视化视频
+    python -m phone_call_rknn.driver --simple            # 参考链路（RKNNLite 单线程）
+"""
 
 from __future__ import annotations
 
 import argparse
+import sys
+import time
 from dataclasses import replace
+from pathlib import Path
 
-from ..config import (
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+import cv2
+
+from ..common.media import is_video, probe_video_size
+from ..common.timing import add_timing_sums, new_timing_sums, print_overall_speed
+from ..hw.gst import open_writer
+from .config import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SOURCE,
     DETECT_MODEL,
@@ -15,14 +31,18 @@ from ..config import (
     WRIST_PHONE_PIXEL_THRES,
     EngineConfig,
 )
+from .engine import AccelEngine
+from .records import write_record
 
-
+# --------------------------------------------------------------------------
+# 参数
+# --------------------------------------------------------------------------
 def parse_engine_args(argv=None):
     """加速链路参数：返回 (args, EngineConfig)。"""
     base = EngineConfig()
     p = argparse.ArgumentParser(
-        prog="main_accel",
-        description="RK3588 加速链路：VPU 硬解(dma-buf) + RGA 单次 CSC + RKNN 零拷贝/int8",
+        prog="driver",
+        description="RK3588 司机行为检测：VPU 硬解(dma-buf) + RGA 单次 CSC + RKNN 零拷贝/int8",
     )
     p.add_argument("--source", default=DEFAULT_SOURCE, help="视频文件、RTSP URL 或摄像头编号")
     p.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录")
@@ -82,8 +102,8 @@ def parse_engine_args(argv=None):
     return args, cfg
 
 
-def parse_args(argv=None):
-    """简单链路（RKNNLite 单线程，逐帧 numpy）参数。"""
+def parse_simple_args(argv=None):
+    """参考链路（RKNNLite 单线程）参数。"""
     p = argparse.ArgumentParser(description="RKNNLite 参考实现（非零拷贝，单线程）")
     p.add_argument("--pose-model", default=str(POSE_MODEL))
     p.add_argument("--detect-model", default=str(DETECT_MODEL))
@@ -102,3 +122,96 @@ def parse_args(argv=None):
     p.add_argument("--no-save-vis", action="store_true")
     p.add_argument("--quiet", action="store_true")
     return p.parse_args(argv)
+
+
+# --------------------------------------------------------------------------
+# 加速链路
+# --------------------------------------------------------------------------
+def main(argv=None) -> int:
+    args, cfg = parse_engine_args(argv)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result_path = output_dir / "frame_results.jsonl"
+    source_name = Path(str(args.source)).name if not str(args.source).isdigit() else f"camera{args.source}"
+
+    writer = None
+    out_video = output_dir / f"{Path(str(args.source)).stem}_accel.mp4"
+    if not cfg.no_save_vis:
+        width, height, fps = probe_video_size(args.source)
+        writer = open_writer(out_video, width, height, fps,
+                             encoder=cfg.encoder, bitrate=cfg.bitrate, fallback=True)
+
+    timing_sums = new_timing_sums()
+    danger_count = processed = 0
+    start = time.time()
+    engine = AccelEngine(cfg).start()
+    try:
+        with result_path.open("w", encoding="utf-8") as jsonl_file:
+            for result in engine.iter_video(args.source, source_name=source_name, writer=writer,
+                                            frame_stride=cfg.frame_stride):
+                write_record(jsonl_file, result.record, cfg.quiet)
+                add_timing_sums(timing_sums, result.timing)
+                danger_count += int(result.danger)
+                processed += 1
+                if cfg.display and result.vis is not None:
+                    cv2.imshow("driver-phone-call-accel", result.vis)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+    finally:
+        engine.release()
+        if writer is not None:
+            writer.release()
+        cv2.destroyAllWindows()
+
+    elapsed = time.time() - start
+    print(f"Frame results saved: {result_path}")
+    print(f"Video done: total_frames={processed}, danger_frames={danger_count}")
+    if processed and elapsed > 0:
+        print(f"Wall speed: {processed / elapsed:.2f} FPS")
+    print_overall_speed("Video", processed, timing_sums)
+    if writer is not None:
+        print(f"Visualization video saved: {out_video}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# 参考链路
+# --------------------------------------------------------------------------
+def main_simple(argv=None) -> int:
+    from .lite_runner import RKNNRunner
+    from .simple import process_images, process_video
+
+    args = parse_simple_args(argv)
+    source_path = Path(args.source)
+    output_dir = Path(args.output_dir)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source path not found: {source_path}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result_path = output_dir / "frame_results.jsonl"
+
+    pose_runner = RKNNRunner(args.pose_model, args.imgsz, args.pose_input_layout)
+    detect_runner = RKNNRunner(args.detect_model, args.imgsz, args.detect_input_layout)
+    try:
+        with result_path.open("w", encoding="utf-8") as jsonl_file:
+            if is_video(source_path):
+                process_video(source_path, output_dir, pose_runner, detect_runner, args, jsonl_file)
+            else:
+                process_images(source_path, output_dir, pose_runner, detect_runner, args, jsonl_file)
+        print(f"Frame results saved: {result_path}")
+    finally:
+        pose_runner.release()
+        detect_runner.release()
+    return 0
+
+
+def main_dispatch(argv=None) -> int:
+    """`--simple` 走参考链路，否则走加速链路。"""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--simple" in argv:
+        argv.remove("--simple")
+        return main_simple(argv)
+    return main(argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main_dispatch())

@@ -8,31 +8,10 @@
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
 
-from _util import check, hr, test_video
+from _util import FakeMinio, check, hr, test_video
 
-from phone_call_rknn.app import service
-
-
-class FakeMinio:
-    def __init__(self, source: Path):
-        self.source = source
-        self.uploaded = []
-
-    def fget_object(self, bucket, name, path):
-        shutil.copyfile(self.source, path)
-
-    def fput_object(self, bucket, name, path, content_type=None):
-        self.uploaded.append((bucket, name))
-        return None
-
-    def bucket_exists(self, bucket):
-        return True
-
-    def make_bucket(self, bucket):
-        return None
+from phone_call_rknn.driver import service
 
 
 def main() -> int:

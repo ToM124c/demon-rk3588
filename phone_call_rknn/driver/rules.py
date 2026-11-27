@@ -2,7 +2,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config import (
+from .config import (
     DEFAULT_PERSON_SCALE,
     LEFT_SHOULDER_IDX,
     LEFT_WRIST_IDX,
@@ -10,7 +10,7 @@ from ..config import (
     RIGHT_SHOULDER_IDX,
     RIGHT_WRIST_IDX,
 )
-from .geometry import box_pair_iou, is_finite_array, point_dist
+from ..vision.geometry import box_pair_iou, is_finite_array, point_dist
 
 
 def person_scale_from_shoulders(xy, confs, kpt_conf):

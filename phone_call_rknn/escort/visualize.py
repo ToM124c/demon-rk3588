@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from ..core.visualize import get_chinese_font
+from ..common.fonts import get_chinese_font
 from .config import (
     HAND_SIDE_LABELS,
     LABEL_COMPLIANT,
