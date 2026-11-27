@@ -136,8 +136,10 @@ class _EscortWorker(threading.Thread):
         try:
             mask = CORE_MASKS[self.core_id]
             self.im2d = Im2d()
-            self.detect = RknnContext(cfg.hand_model, core_mask=mask, name=f"{self.name}-hand")
-            self.pose = RknnContext(cfg.pose_model, core_mask=mask, name=f"{self.name}-pose")
+            detect = RknnContext(cfg.hand_model, core_mask=mask, name=f"{self.name}-hand")
+            pose = RknnContext(cfg.pose_model, core_mask=mask, name=f"{self.name}-pose")
+            self.detect = detect
+            self.pose = pose
             self.tensor = self.detect.bind_owned_input(pass_through=False, dtype=TENSOR_UINT8, fmt=TENSOR_NHWC)
             self.letterboxer = Letterboxer(cfg.imgsz, im2d=self.im2d)
             self.letterboxer.bind_fd(self.tensor.fd)
@@ -154,8 +156,8 @@ class _EscortWorker(threading.Thread):
                 self.pose_letterboxer.bind_fd(pose_tensor.fd)
 
             for _ in range(max(1, cfg.npu_warmup)):
-                self.detect.run()
-                self.pose.run()
+                detect.run()
+                pose.run()
             self.ready.set()
 
             while True:
@@ -179,6 +181,10 @@ class _EscortWorker(threading.Thread):
     # ---- 单帧分析 -------------------------------------------------
     def _analyze(self, job: _Job, emit: bool = True) -> EscortResult:
         cfg = self.pipeline.config
+        detect = self.detect
+        pose = self.pose
+        if detect is None or pose is None:
+            raise RuntimeError("escort worker contexts are not initialised")
         frame = job.lease.frame
         shape = (frame.height, frame.width, 3)
 
@@ -194,13 +200,13 @@ class _EscortWorker(threading.Thread):
             p_scale, p_pad_x, p_pad_y = scale, pad_x, pad_y
 
         t1 = time.perf_counter()
-        det_outputs = self.detect.run()
+        det_outputs = detect.run()
         t2 = time.perf_counter()
-        pose_outputs = self.pose.run()
+        pose_outputs = pose.run()
         t3 = time.perf_counter()
 
         dets = decode_detect_quantized(
-            det_outputs, self.detect.outputs, scale, pad_x, pad_y, shape, cfg.det_conf, cfg.iou
+            det_outputs, detect.outputs, scale, pad_x, pad_y, shape, cfg.det_conf, cfg.iou
         )
         hand_dets = [det for det in dets if det["class"] == "hand"]
         t4 = time.perf_counter()

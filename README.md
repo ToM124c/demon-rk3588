@@ -123,6 +123,26 @@ python tests/bench_compare.py            # 新旧管线对比
 
 ---
 
+## 开发环境与静态检查
+
+仓库自带 `pyrightconfig.json`、`typings/gi/*.pyi`（PyGObject 无官方 stubs）和
+`.vscode/settings.json`，装好 VS Code / Cursor / Qoder 等 IDE 后应当「零波浪线」：
+
+```bash
+# 命令行自检（与 IDE 同一套规则）
+python -m pip install pyright ruff
+python -m pyright                     # 期望 0 errors, 0 warnings
+python -m ruff check --select F,E9 phone_call_rknn tests
+```
+
+IDE 侧要点：
+
+1. 解释器选 `jl-rk3588`（`python.defaultInterpreterPath` 已指向
+   `/home/firefly/anaconda3/envs/jl-rk3588/bin/python`），否则 `numpy/opencv/minio`
+   会报 "import could not be resolved"。
+2. `gi`（系统 PyGObject）由 `typings/gi/` 的类型桩解析，不需要额外安装。
+3. `legacy/rknn_multi_threaded` 是上游 demo 副本，已在分析配置里排除。
+
 ## 配置（环境变量）
 
 | 变量 | 默认 | 说明 |

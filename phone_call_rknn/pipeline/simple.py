@@ -123,7 +123,7 @@ def process_video(source_path, output_dir, pose_runner, detect_runner, args, jso
     writer = None
     out_video = output_dir / f"{source_path.stem}_phone_call.mp4"
     if not args.no_save_vis:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter.fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(out_video), fourcc, fps, (width, height))
         if not writer.isOpened():
             cap.release()

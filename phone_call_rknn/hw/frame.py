@@ -38,7 +38,7 @@ class Frame:
 
     @property
     def nbytes(self) -> int:
-        return int(self.wstride) * int(self.hstride) * 3 // 2
+        return int(self.wstride or self.width) * int(self.hstride or self.height) * 3 // 2
 
     def release(self) -> None:
         """释放底层引用（GStreamer buffer / numpy 数组）。"""

@@ -44,8 +44,8 @@ CORE_MASKS = {
 
 @dataclass
 class AccelConfig:
-    pose_model: str = POSE_MODEL
-    detect_model: str = DETECT_MODEL
+    pose_model: str = str(POSE_MODEL)
+    detect_model: str = str(DETECT_MODEL)
     imgsz: int = 640
     det_conf: float = 0.35
     person_conf: float = 0.25
@@ -133,7 +133,7 @@ class RKNNThreadPool:
 
     def put(self, item):
         rknn = self._rknns[self._num % len(self._rknns)]
-        future = self._pool.submit(self._func, rknn, item, self._args)
+        future = self._pool.submit(self._func, rknn, item, self._args)  # pyright: ignore[reportCallIssue]
         self._futures.add(future)
         self._num += 1
 

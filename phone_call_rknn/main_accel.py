@@ -42,8 +42,9 @@ def main(argv=None) -> int:
 
     width, height, fps = probe_source(args.source, cfg.codec)
     writer = None
+    out_video = output_dir / f"{Path(str(args.source)).stem}_accel.mp4"
     if not cfg.no_save_vis and width > 0 and height > 0:
-        writer = open_writer(output_dir / f"{Path(str(args.source)).stem}_accel.mp4", width, height, fps,
+        writer = open_writer(out_video, width, height, fps,
                              encoder=cfg.encoder, bitrate=cfg.bitrate, fallback=True)
 
     timing_sums = new_timing_sums()
@@ -75,7 +76,7 @@ def main(argv=None) -> int:
         print(f"Wall speed: {processed / elapsed:.2f} FPS")
     print_overall_speed("Video", processed, timing_sums)
     if writer is not None:
-        print(f"Visualization video saved: {writer.output_path}")
+        print(f"Visualization video saved: {out_video}")
     return 0
 
 

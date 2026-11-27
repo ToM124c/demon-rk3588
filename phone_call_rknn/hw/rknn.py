@@ -11,6 +11,7 @@ from __future__ import annotations
 import ctypes
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -263,6 +264,8 @@ def dequantize(values, zp: int, scale: float, dtype=np.float32):
 class SharedTensor:
     """一块可供 RGA 与多个 RKNN context 共同使用的 dma-buf 张量。"""
 
+    _owned_by_ctx: bool = False
+
     def __init__(self, owner: "RknnContext", size: int):
         self._owner = owner
         ptr = _lib.rknn_create_mem(owner.ctx, int(size))
@@ -302,7 +305,7 @@ def _dtype_itemsize(dtype: int) -> int:
 class RknnContext:
     """一个 RKNN context，绑定一个模型与一个 NPU core。"""
 
-    def __init__(self, model_path: str, core_mask: Optional[int] = None, name: str = "rknn"):
+    def __init__(self, model_path: str | Path, core_mask: Optional[int] = None, name: str = "rknn"):
         self.name = name
         self.model_path = str(model_path)
         self._model = None
@@ -464,6 +467,8 @@ class RknnContext:
                 info = self._output_infos[i]
                 nbytes = int(outs[i].size) or info.size
                 addr = ctypes.cast(outs[i].buf, ctypes.c_void_p).value
+                if addr is None:
+                    raise RuntimeError(f"{self.name}: output {i} buffer is NULL")
                 if info.is_int8:
                     flat = np.ctypeslib.as_array((ctypes.c_int8 * nbytes).from_address(addr)).copy()
                 elif info.is_uint8:
@@ -484,6 +489,11 @@ class RknnContext:
         if _lib.rknn_query(self._ctx, QUERY_PERF_RUN, ctypes.byref(perf), ctypes.sizeof(perf)) == 0:
             return perf.run_duration / 1000.0
         return 0.0
+
+    @property
+    def ctx(self) -> int:
+        """底层 rknn_context 句柄（SharedTensor 等内部结构使用）。"""
+        return int(self._ctx.value)
 
     @property
     def outputs(self) -> tuple:

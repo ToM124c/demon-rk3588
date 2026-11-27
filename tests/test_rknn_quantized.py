@@ -24,6 +24,7 @@ def compare(name, model_path, tensor):
     assert lite.load_rknn(str(model_path)) == 0
     assert lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2) == 0
     ref = lite.inference(inputs=[tensor])
+    assert ref is not None, "RKNNLite inference returned None"
     lite.release()
 
     ctx = RknnContext(model_path, core_mask=CORE_0_1_2, name=name)
@@ -50,10 +51,12 @@ def main() -> int:
     cap = DmaBufCapture(str(video))
     frame = cap.read()
     cap.release()
+    assert frame is not None and frame.fd is not None
     lb = Letterboxer(640)
     rgb, scale, pad_x, pad_y = lb.from_fd(frame.fd, frame.width, frame.height, frame.pixel_format,
                                           frame.wstride, frame.hstride)
     frame.release()
+    assert rgb is not None
     tensor = np.ascontiguousarray(rgb[None], dtype=np.uint8)
 
     hr("detect：int8 输出 + 自反量化")

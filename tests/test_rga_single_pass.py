@@ -20,7 +20,9 @@ def legacy_letterbox(nv12_bytes, width, height, im2d):
     """旧实现：NV12->BGR -> resize -> BGR->RGB（两次全画幅色彩转换）。"""
     from legacy.rknn_multi_threaded.rga_helper import get_rga_letterbox
 
-    rgb, scale, pad_x, pad_y, _ = get_rga_letterbox(640).letterbox_from_nv12(nv12_bytes, width, height, "nv12")
+    helper = get_rga_letterbox(640)
+    assert helper is not None
+    rgb, scale, pad_x, pad_y, _ = helper.letterbox_from_nv12(nv12_bytes, width, height, "nv12")
     return rgb
 
 
@@ -54,6 +56,7 @@ def main() -> int:
         frame._keepalive.get_buffer().unmap(info)
 
         t0 = time.perf_counter()
+        assert frame.fd is not None
         rgb, scale, pad_x, pad_y = lb.from_fd(frame.fd, frame.width, frame.height, frame.pixel_format,
                                               frame.wstride, frame.hstride)
         new_ms.append((time.perf_counter() - t0) * 1000)
@@ -62,6 +65,7 @@ def main() -> int:
         ref = legacy_letterbox(nv12, frame.width, frame.height, im2d)
         old_ms.append((time.perf_counter() - t0) * 1000)
 
+        assert rgb is not None, "CPU 目标应返回 numpy 视图"
         diffs.append(float(np.abs(rgb.astype(np.int16) - ref.astype(np.int16)).mean()))
         frame.release()
 

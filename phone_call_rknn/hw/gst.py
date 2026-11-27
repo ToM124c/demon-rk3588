@@ -15,7 +15,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -24,7 +24,10 @@ from .frame import Frame, UnsupportedSample, frame_from_sample
 
 _SYSTEM_GI_PATH = "/usr/lib/python3/dist-packages"
 
-Gst = GstApp = GstVideo = GstAllocators = None
+Gst: Any = None
+GstApp: Any = None
+GstVideo: Any = None
+GstAllocators: Any = None
 GST_IMPORT_ERROR: Optional[Exception] = None
 
 
@@ -86,6 +89,7 @@ class DmaBufCapture:
         self.appsink = self.pipeline.get_by_name("sink")
         self._lock = threading.Lock()
         self._eos = False
+        self._pending = None
         self.pipeline.set_state(Gst.State.PLAYING)
         self.width, self.height = 0, 0
         self._probe_caps()
@@ -154,7 +158,7 @@ class DmaBufCapture:
 
     def read(self):
         with self._lock:
-            sample = getattr(self, "_pending", None)
+            sample = self._pending
             self._pending = None
             if sample is None:
                 sample = self.appsink.try_pull_sample(int(1e9))
@@ -169,7 +173,7 @@ class DmaBufCapture:
     def drop_one(self) -> bool:
         """丢弃一帧：不取 fd、不建 Frame（抽帧时用，最省 CPU）。"""
         with self._lock:
-            if getattr(self, "_pending", None) is not None:
+            if self._pending is not None:
                 self._pending = None
                 return True
             return self.appsink.try_pull_sample(int(1e9)) is not None
@@ -178,8 +182,10 @@ class DmaBufCapture:
         return "nv12_10le40" if self.codec in {"h265", "hevc"} else "nv12"
 
     def release(self) -> None:
+        pipeline = self.pipeline
         try:
-            self.pipeline.set_state(Gst.State.NULL)
+            if pipeline is not None:
+                pipeline.set_state(Gst.State.NULL)
         finally:
             self.pipeline = None
 
@@ -218,6 +224,8 @@ class OpenCVNv12Capture:
         return f"{parser} ! mppvideodec"
 
     def read(self):
+        if self.cap is None:
+            return None
         ret, frame = self.cap.read()
         if not ret or frame is None:
             return None
@@ -226,7 +234,7 @@ class OpenCVNv12Capture:
         return Frame(width=self.width, height=self.height, pixel_format="bgr", va=frame, _keepalive=frame)
 
     def drop_one(self) -> bool:
-        return bool(self.cap.grab())
+        return bool(self.cap is not None and self.cap.grab())
 
     def release(self):
         if self.cap is not None:
@@ -247,13 +255,15 @@ class CvCapture:
         self.pipeline_desc = None
 
     def read(self):
+        if self.cap is None:
+            return None
         ret, frame = self.cap.read()
         if not ret or frame is None:
             return None
         return Frame(width=self.width, height=self.height, pixel_format="bgr", va=frame, _keepalive=frame)
 
     def drop_one(self) -> bool:
-        return bool(self.cap.grab())
+        return bool(self.cap is not None and self.cap.grab())
 
     def release(self):
         if self.cap is not None:
@@ -289,7 +299,7 @@ class VpuWriter:
         self.writer = cv2.VideoWriter(self.pipeline, cv2.CAP_GSTREAMER, 0, self.fps, (self.width, self.height))
         if not self.writer.isOpened() and fallback:
             self.pipeline = None
-            self.writer = cv2.VideoWriter(str(self.output_path), cv2.VideoWriter_fourcc(*"mp4v"), self.fps,
+            self.writer = cv2.VideoWriter(str(self.output_path), cv2.VideoWriter.fourcc(*"mp4v"), self.fps,
                                           (self.width, self.height))
         if not self.writer.isOpened():
             raise RuntimeError(f"cannot open video writer: {self.output_path}")
@@ -321,7 +331,7 @@ def open_writer(output_path, width, height, fps, encoder: str = "vpu", bitrate=N
         except Exception:
             if not fallback:
                 raise
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter.fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(output_path), fourcc, float(fps), (int(width), int(height)))
     if not writer.isOpened():
         raise RuntimeError(f"cannot open mp4v writer: {output_path}")

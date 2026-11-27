@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import tempfile
 from pathlib import Path
 
 from _util import check, hr, test_video

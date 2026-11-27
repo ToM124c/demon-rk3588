@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 
 from ..config import (
@@ -50,7 +52,7 @@ def get_wrist_points(persons, kpt_conf):
 
 
 def assign_hands_to_wrists(wrists, hand_dets, thres):
-    assignments = {i: {"left": None, "right": None} for i in range(len(wrists))}
+    assignments: dict[int, dict[str, Any]] = {i: {"left": None, "right": None} for i in range(len(wrists))}
     candidates = []
     for wrist_idx, wrist in enumerate(wrists):
         scale = wrist.get("scale", DEFAULT_PERSON_SCALE)
@@ -67,8 +69,9 @@ def assign_hands_to_wrists(wrists, hand_dets, thres):
     for dist_norm, wrist_idx, side, hand_idx in sorted(candidates):
         if hand_idx in used_hands or assignments[wrist_idx][side] is not None:
             continue
-        assignments[wrist_idx][side] = hand_dets[hand_idx]
-        assignments[wrist_idx][side]["wrist_dist_norm"] = float(dist_norm)
+        hand = hand_dets[hand_idx]
+        hand["wrist_dist_norm"] = float(dist_norm)
+        assignments[wrist_idx][side] = hand
         used_hands.add(hand_idx)
     return assignments
 

@@ -261,8 +261,10 @@ class Letterboxer:
     def _dst_for(self, src_kind: str) -> "Wrapped":
         """选择与 src 同类的目标 buffer（RGA 不允许 fd/handle 混用）。"""
         if src_kind == "fd" and self._dst_fd_value is not None:
+            assert self._dst is not None, "destination buffer not bound"
             return self._dst
         if src_kind == "handle" and self._dst_array is not None:
+            assert self._dst is not None, "destination buffer not bound"
             return self._dst
         if self._dst_handle is None:
             if self._dst_fd_value is None:
@@ -302,11 +304,16 @@ class Letterboxer:
             if self._dst is not None:
                 # 几何变化后重填边框，避免残留上一路视频的边缘
                 self.im2d.fill(self._dst, color_bgr=self.color)
+        assert self._geometry is not None, "letterbox geometry not computed"
         return self._geometry
 
     # ---- 预处理 ---------------------------------------------------
     def from_buffer(self, src: Wrapped, src_w: int, src_h: int):
-        """src 已包装成 RGA buffer（fd 或 VA），一步缩放+CSC 到 dst。"""
+        """src 已包装成 RGA buffer（fd 或 VA），一步缩放+CSC 到 dst。
+
+        返回 `(dst_array, scale, pad_x, pad_y)`；当目标是 dma-buf（零拷贝模式）时
+        `dst_array` 为 None——只有 CPU 目标才会给出 numpy 视图。
+        """
         scale, left, top, new_w, new_h = self.geometry(src_w, src_h)
         if self._dst is None:
             self.owned_array()
@@ -319,7 +326,7 @@ class Letterboxer:
         )
         return self._dst_array, scale, float(left), float(top)
 
-    def from_nv12(self, nv12: np.ndarray, width: int, height: int, pixel_format: str = "nv12"):
+    def from_nv12(self, nv12: np.ndarray, width: int, height: int, pixel_format: str = "nv12") -> "tuple[Optional[np.ndarray], float, float, float]":
         fmt = RK_FORMAT_YCbCr_420_SP_10B if pixel_format == "nv12_10le40" else RK_FORMAT_YCbCr_420_SP
         src = self.im2d.wrap_va(nv12, width, height, width, height, fmt)
         try:
@@ -328,7 +335,7 @@ class Letterboxer:
             self.im2d.release(src)
 
     def from_fd(self, fd: int, width: int, height: int, pixel_format: str = "nv12", wstride: Optional[int] = None,
-                hstride: Optional[int] = None):
+                hstride: Optional[int] = None) -> "tuple[Optional[np.ndarray], float, float, float]":
         fmt = RK_FORMAT_YCbCr_420_SP_10B if pixel_format == "nv12_10le40" else RK_FORMAT_YCbCr_420_SP
         if self._dst_fd_value is not None and self._dst_array is None:
             src = self.im2d.wrap_fd(fd, width, height, wstride or width, hstride or height, fmt)

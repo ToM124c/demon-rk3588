@@ -15,10 +15,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Iterator, List, Optional
 
-import cv2
 import numpy as np
 
-from ..config import EngineConfig, resolve_rknn_path
+from ..config import EngineConfig
 from ..core.postprocess import decode_detect_quantized, decode_pose_half
 from ..core.records import make_frame_record
 from ..core.rules import closest_wrist_phone_match, evaluate_detect_rule, get_wrist_points
@@ -138,13 +137,14 @@ class _Worker(threading.Thread):
     def run(self):
         try:
             mask = CORE_MASKS[self.core_id]
-            self.ctx = RknnContext(self.model_path, core_mask=mask, name=self.name)
-            self.tensor = self.ctx.bind_owned_input(pass_through=False, dtype=TENSOR_UINT8, fmt=TENSOR_NHWC)
+            ctx = RknnContext(self.model_path, core_mask=mask, name=self.name)
+            self.ctx = ctx
+            self.tensor = ctx.bind_owned_input(pass_through=False, dtype=TENSOR_UINT8, fmt=TENSOR_NHWC)
             self.im2d = Im2d()
             self.letterboxer = Letterboxer(self.imgsz, im2d=self.im2d)
             self.letterboxer.bind_fd(self.tensor.fd)
             for _ in range(max(1, int(self.warmup_rounds))):
-                self.ctx.run()
+                ctx.run()
             self.ready.set()
             while True:
                 job = self.jobs.get()
@@ -239,15 +239,18 @@ def make_timing(detect_timing, pose_timing, shared_preprocess_ms=0.0):
 def _detect_handler(worker: _Worker, job: _Job):
     engine = worker.engine
     cfg = engine.config
+    ctx = worker.ctx
+    if ctx is None:
+        raise RuntimeError("detect worker context is not initialised")
     frame = job.lease.frame
 
     t0 = time.perf_counter()
     _rgb, scale, pad_x, pad_y = preprocess_frame(worker, frame)
     t1 = time.perf_counter()
-    outputs = worker.ctx.run()
+    outputs = ctx.run()
     t2 = time.perf_counter()
     dets = decode_detect_quantized(
-        outputs, worker.ctx.outputs, scale, pad_x, pad_y,
+        outputs, ctx.outputs, scale, pad_x, pad_y,
         (frame.height, frame.width, 3), cfg.det_conf, cfg.iou,
     )
     t3 = time.perf_counter()
@@ -287,12 +290,15 @@ def _detect_handler(worker: _Worker, job: _Job):
 def _pose_handler(worker: _Worker, job: _PoseJob):
     engine = worker.engine
     cfg = engine.config
+    ctx = worker.ctx
+    if ctx is None:
+        raise RuntimeError("pose worker context is not initialised")
     frame = job.lease.frame
 
     t0 = time.perf_counter()
     _rgb, scale, pad_x, pad_y = preprocess_frame(worker, frame)
     t1 = time.perf_counter()
-    outputs = worker.ctx.run()
+    outputs = ctx.run()
     t2 = time.perf_counter()
     persons = decode_pose_half(
         outputs[0], scale, pad_x, pad_y,

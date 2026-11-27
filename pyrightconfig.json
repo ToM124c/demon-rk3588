@@ -4,13 +4,34 @@
     "tests",
     "legacy/engine_accel_old.py"
   ],
+  "exclude": [
+    "**/__pycache__",
+    ".tests_tmp",
+    ".dev",
+    "model",
+    "legacy/rknn_multi_threaded"
+  ],
+  "stubPath": "typings",
   "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
   "venvPath": "/home/firefly/anaconda3/envs",
   "venv": "jl-rk3588",
   "extraPaths": [
     ".",
-    "/home/firefly/anaconda3/envs/jl-rk3588/lib/python3.10/site-packages"
+    "tests"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "extraPaths": [
+        "..",
+        "."
+      ]
+    }
   ],
   "reportMissingImports": "warning",
-  "reportMissingModuleSource": "warning"
+  "reportMissingModuleSource": "none",
+  "reportPrivateUsage": "none",
+  "reportUnusedImport": "none",
+  "reportUnusedVariable": "none"
 }

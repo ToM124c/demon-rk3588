@@ -7,7 +7,6 @@ import os
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import quote, urlparse
@@ -15,7 +14,7 @@ from urllib.parse import quote, urlparse
 import cv2
 from minio import Minio
 
-from ..config import EngineConfig, default_engine_config
+from ..config import default_engine_config
 from ..core.visualize import draw_annotations
 from ..pipeline.engine import AccelEngine
 
