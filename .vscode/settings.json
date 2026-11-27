@@ -27,7 +27,6 @@
   },
   "files.exclude": {
     "**/__pycache__": true,
-    ".tests_tmp": true,
-    "model/*.rknn": true
+    ".tests_tmp": true
   }
 }
